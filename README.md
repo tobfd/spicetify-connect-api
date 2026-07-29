@@ -45,6 +45,16 @@ spicetify apply
 
 ---
 
+## 🐍 Recommended Python Library
+
+If you are building a Python application to interact with this extension, it is highly recommended to use the companion Python package:
+
+👉 **[tobfd/spicetify-websocket](https://github.com/tobfd/spicetify-websocket)**
+
+It handles the WebSocket server setup, JSON parsing, event listeners, response matching, and typed command execution out of the box so you don't have to build the protocol logic from scratch!
+
+---
+
 ## WebSocket API Specification
 
 By default, the extension connects to `ws://127.0.0.1:9090`.

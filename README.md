@@ -27,7 +27,7 @@ A lightweight, standalone JavaScript extension for Spicetify that acts as a real
 
 ### Manual Installation
 
-1. Download `spicetify-connect-api.js`.
+1. Download [spicetify-connect-api.js](https://github.com/tobfd/spicetify-connect-api/releases/latest/download/spicetify-connect-api.js).
 
 2. Place the file in the appropriate path for your operating system:
     - **Windows**: `C:\Users\%username%\AppData\Roaming\spicetify\Extensions\` (Just paste it to `Win + R`.)

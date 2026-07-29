@@ -47,6 +47,7 @@
     let socket = null;
     let reconnectTimer = null;
     let volumeDebounceTimer = null;
+    let pingTimer = null;
     let lastVolume = null;
 
     // -------------------------------------------------------------------------
@@ -189,6 +190,7 @@
 
             socket.onopen = () => {
                 console.log("[Spicetify-WS] WebSocket connection established!");
+                startHeartbeat();
                 Spicetify.showNotification("Connect API: Server connected!");
                 sendEvent("InitialState", getFullPlayerState());
                 lastVolume = Spicetify.Player.getVolume();
@@ -203,6 +205,7 @@
             };
 
             socket.onclose = () => {
+                stopHeartbeat();
                 console.info(`[Spicetify-WS] Connection closed. Reconnecting in ${currentConfig.RECONNECT_INTERVAL}ms...`);
                 scheduleReconnect();
             };
@@ -219,6 +222,22 @@
         reconnectTimer = setTimeout(() => {
             connect();
         }, currentConfig.RECONNECT_INTERVAL);
+    }
+
+    function startHeartbeat() {
+        stopHeartbeat();
+        pingTimer = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                sendEvent("Ping", { timestamp: Date.now() });
+            }
+        }, 30000);
+    }
+
+    function stopHeartbeat() {
+        if (pingTimer) {
+            clearInterval(pingTimer);
+            pingTimer = null;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -247,6 +266,9 @@
 
         try {
             switch (requestName) {
+                case "Ping":
+                    sendResponse(requestId, true, { message: "Pong", timestamp: Date.now() });
+                    break;
                 case "Play":
                     Spicetify.Player.play();
                     sendResponse(requestId, true, { isPlaying: true });

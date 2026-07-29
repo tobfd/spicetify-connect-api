@@ -1,5 +1,8 @@
-# Spicetify WebSocket Client Extension
 ![Spicetify WebSocket Client Extension](assets/banner.png)
+
+[![GitHub License](https://img.shields.io/github/license/tobfd/spicetify-connect-api?style=for-the-badge&logo=github&color=240046)](https://github.com/tobfd/spicetify-connect-api/blob/master/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/tobfd/spicetify-connect-api?style=for-the-badge&logo=github&color=5A189A)](https://github.com/tobfd/spicetify-connect-api/releases/latest)
+[![GitHub Release](https://img.shields.io/github/v/release/tobfd/spicetify-websocket?style=for-the-badge&logo=python&logoColor=white&label=spicetify-websocket&color=C77DFF)](https://github.com/tobfd/spicetify-websocket)
 
 A lightweight, standalone JavaScript extension for Spicetify that acts as a real-time bi-directional bridge between the Spotify Desktop Client and a WebSocket server (e.g., Python).
 

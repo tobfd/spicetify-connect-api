@@ -1,4 +1,5 @@
 # Spicetify WebSocket Client Extension
+![Spicetify WebSocket Client Extension](assets/banner.png)
 
 A lightweight, standalone JavaScript extension for Spicetify that acts as a real-time bi-directional bridge between the Spotify Desktop Client and a WebSocket server (e.g., Python).
 

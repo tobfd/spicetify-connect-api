@@ -1,4 +1,8 @@
-# Spicetify WebSocket Client Extension
+![Spicetify WebSocket Client Extension](assets/banner.png)
+
+[![GitHub License](https://img.shields.io/github/license/tobfd/spicetify-connect-api?style=for-the-badge&logo=github&color=240046)](https://github.com/tobfd/spicetify-connect-api/blob/master/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/tobfd/spicetify-connect-api?style=for-the-badge&logo=github&color=5A189A)](https://github.com/tobfd/spicetify-connect-api/releases/latest)
+[![GitHub Release](https://img.shields.io/github/v/release/tobfd/spicetify-websocket?style=for-the-badge&logo=python&logoColor=white&label=spicetify-websocket&color=C77DFF)](https://github.com/tobfd/spicetify-websocket)
 
 A lightweight, standalone JavaScript extension for Spicetify that acts as a real-time bi-directional bridge between the Spotify Desktop Client and a WebSocket server (e.g., Python).
 
@@ -23,7 +27,7 @@ A lightweight, standalone JavaScript extension for Spicetify that acts as a real
 
 ### Manual Installation
 
-1. Download `spicetify-connect-api.js`.
+1. Download [spicetify-connect-api.js](https://github.com/tobfd/spicetify-connect-api/releases/latest/download/spicetify-connect-api.js).
 
 2. Place the file in the appropriate path for your operating system:
     - **Windows**: `C:\Users\%username%\AppData\Roaming\spicetify\Extensions\` (Just paste it to `Win + R`.)
@@ -38,6 +42,16 @@ spicetify config extensions spicetify-connect-api.js
 ```bash
 spicetify apply
 ```
+
+---
+
+## 🐍 Recommended Python Library
+
+If you are building a Python application to interact with this extension, it is highly recommended to use the companion Python package:
+
+👉 **[tobfd/spicetify-websocket](https://github.com/tobfd/spicetify-websocket)**
+
+It handles the WebSocket server setup, JSON parsing, event listeners, response matching, and typed command execution out of the box so you don't have to build the protocol logic from scratch!
 
 ---
 

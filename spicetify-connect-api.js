@@ -186,6 +186,7 @@
 
             socket.onopen = () => {
                 console.log("[Spicetify-WS] WebSocket connection established!");
+                Spicetify.showNotification("Connect API: Server connected!");
                 sendEvent("InitialState", getFullPlayerState());
                 lastVolume = Spicetify.Player.getVolume();
             };

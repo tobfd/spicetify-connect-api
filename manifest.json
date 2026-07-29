@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Spicetify Connect API",
+    "description": "Real-time bi-directional WebSocket bridge between Spotify Desktop and external servers.",
+    "preview": "assets/preview.png",
+    "main": "spicetify-connect-api.js",
+    "readme": "README.md",
+    "authors": [
+      {
+        "name": "tobfd",
+        "url": "https://github.com/tobfd"
+      }
+    ],
+    "tags": ["websocket", "api", "automation", "remote"]
+  }
+]

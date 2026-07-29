@@ -350,7 +350,7 @@
             });
         });
 
-        Spicetify.Player.addEventListener("onplaypause", (event) => {
+        Spicetify.Player.addEventListener("onplaypause", () => {
             lastProgress = Spicetify.Player.getProgress();
             lastProgressTime = Date.now();
             sendEvent("PlayPauseChanged", {

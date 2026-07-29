@@ -31,9 +31,12 @@
     };
 
     function getConfig() {
+        const rawInterval = parseInt(Spicetify.LocalStorage.get(STORAGE_KEYS.RECONNECT_INTERVAL), 10);
+        const validInterval = !isNaN(rawInterval) ? Math.max(1000, rawInterval) : DEFAULT_CONFIG.RECONNECT_INTERVAL;
+
         return {
             SERVER_URL: Spicetify.LocalStorage.get(STORAGE_KEYS.SERVER_URL) || DEFAULT_CONFIG.SERVER_URL,
-            RECONNECT_INTERVAL: parseInt(Spicetify.LocalStorage.get(STORAGE_KEYS.RECONNECT_INTERVAL), 10) || DEFAULT_CONFIG.RECONNECT_INTERVAL,
+            RECONNECT_INTERVAL: validInterval,
             API_KEY: Spicetify.LocalStorage.get(STORAGE_KEYS.API_KEY) || DEFAULT_CONFIG.API_KEY,
             VOLUME_DEBOUNCE_MS: DEFAULT_CONFIG.VOLUME_DEBOUNCE_MS,
             VOLUME_CHECK_INTERVAL: DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL

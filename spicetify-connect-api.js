@@ -18,12 +18,14 @@
 
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
-        RECONNECT_INTERVAL: "spicetify-connect-api:reconnect_interval"
+        RECONNECT_INTERVAL: "spicetify-connect-api:reconnect_interval",
+        API_KEY: "spicetify-connect-api:api_key"
     };
 
     const DEFAULT_CONFIG = {
         SERVER_URL: "ws://127.0.0.1:9090",
         RECONNECT_INTERVAL: 3000,
+        API_KEY: "",
         VOLUME_DEBOUNCE_MS: 150,
         VOLUME_CHECK_INTERVAL: 200
     };
@@ -32,6 +34,7 @@
         return {
             SERVER_URL: Spicetify.LocalStorage.get(STORAGE_KEYS.SERVER_URL) || DEFAULT_CONFIG.SERVER_URL,
             RECONNECT_INTERVAL: parseInt(Spicetify.LocalStorage.get(STORAGE_KEYS.RECONNECT_INTERVAL), 10) || DEFAULT_CONFIG.RECONNECT_INTERVAL,
+            API_KEY: Spicetify.LocalStorage.get(STORAGE_KEYS.API_KEY) || DEFAULT_CONFIG.API_KEY,
             VOLUME_DEBOUNCE_MS: DEFAULT_CONFIG.VOLUME_DEBOUNCE_MS,
             VOLUME_CHECK_INTERVAL: DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL
         };
@@ -122,7 +125,12 @@
     function sendEvent(eventName, payload = {}) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             try {
-                socket.send(JSON.stringify({ eventName, payload }));
+                const config = getConfig();
+                const msg = { eventName, payload };
+                if (config.API_KEY) {
+                    msg.token = config.API_KEY;
+                }
+                socket.send(JSON.stringify(msg));
             } catch (err) {
                 console.warn("[Spicetify-WS] Error sending event:", err);
             }
@@ -132,12 +140,16 @@
     function sendResponse(requestId, success, payload = {}, error = null) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             try {
+                const config = getConfig();
                 const response = {
                     eventName: "Response",
                     requestId: requestId || null,
                     success: !!success,
                     payload: payload
                 };
+                if (config.API_KEY) {
+                    response.token = config.API_KEY;
+                }
                 if (error) response.error = error;
                 socket.send(JSON.stringify(response));
             } catch (err) {
@@ -218,8 +230,16 @@
             return;
         }
 
-        const { requestName, requestId, payload = {} } = request;
+        const { requestName, requestId, token, payload = {} } = request;
         if (!requestName) return;
+
+        // Token authentication check if API_KEY is set
+        const currentConfig = getConfig();
+        if (currentConfig.API_KEY && token !== currentConfig.API_KEY) {
+            console.warn(`[Spicetify-WS] Unauthorized request attempt for '${requestName}'. Token mismatch.`);
+            sendResponse(requestId, false, {}, "Unauthorized: Invalid or missing API key.");
+            return;
+        }
 
         try {
             switch (requestName) {
@@ -421,7 +441,12 @@
             <div>
                 <label style="display:block; margin-bottom:5px; font-weight:bold;">WebSocket Server URL</label>
                 <input type="text" id="ws-server-url" value="${currentConfig.SERVER_URL}" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-                <small style="color:#aaa;">Use ws://127.0.0.1:9090 for local or wss://IP:PORT for encrypted remote connections.</small>
+                <small style="color:#aaa;">Use <code>ws://127.0.0.1:9090</code> for local or <code>wss://IP:PORT</code> (or domain) for encrypted remote connections.</small>
+            </div>
+            <div>
+                <label style="display:block; margin-bottom:5px; font-weight:bold;">API Key / Secret Token (Optional)</label>
+                <input type="password" id="ws-api-key" value="${currentConfig.API_KEY}" placeholder="Leave empty if authentication is disabled" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
+                <small style="color:#aaa;">Optional security token sent with outbound events and required for incoming commands.</small>
             </div>
             <div>
                 <label style="display:block; margin-bottom:5px; font-weight:bold;">Reconnect Interval (ms)</label>
@@ -440,9 +465,11 @@
             if (saveBtn) {
                 saveBtn.onclick = () => {
                     const newUrl = document.getElementById("ws-server-url").value.trim();
+                    const newApiKey = document.getElementById("ws-api-key").value.trim();
                     const newInterval = document.getElementById("ws-reconnect-interval").value.trim();
 
                     if (newUrl) Spicetify.LocalStorage.set(STORAGE_KEYS.SERVER_URL, newUrl);
+                    Spicetify.LocalStorage.set(STORAGE_KEYS.API_KEY, newApiKey);
                     if (newInterval) Spicetify.LocalStorage.set(STORAGE_KEYS.RECONNECT_INTERVAL, newInterval);
 
                     Spicetify.PopupModal.hide();

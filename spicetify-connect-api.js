@@ -86,13 +86,20 @@
             } catch (e) {}
         }
 
-        if (input.includes("spotify.com")) {
+        if (input.startsWith("http://") || input.startsWith("https://")) {
             try {
                 const url = new URL(input);
-                const pathSegments = url.pathname.split("/").filter(Boolean);
-                const typeIndex = pathSegments.findIndex(seg => ["track", "album", "playlist", "artist", "episode", "show"].includes(seg));
-                if (typeIndex !== -1 && pathSegments[typeIndex + 1]) {
-                    return `spotify:${pathSegments[typeIndex]}:${pathSegments[typeIndex + 1]}`;
+                const host = url.hostname.toLowerCase();
+                const isSpotifyHost = host === "spotify.com" || host.endsWith(".spotify.com");
+
+                if (isSpotifyHost) {
+                    const pathSegments = url.pathname.split("/").filter(Boolean);
+                    const typeIndex = pathSegments.findIndex(seg =>
+                        ["track", "album", "playlist", "artist", "episode", "show"].includes(seg)
+                    );
+                    if (typeIndex !== -1 && pathSegments[typeIndex + 1]) {
+                        return `spotify:${pathSegments[typeIndex]}:${pathSegments[typeIndex + 1]}`;
+                    }
                 }
             } catch (e) {
                 console.warn("[Spicetify-WS] Error parsing Spotify URL:", e);

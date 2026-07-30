@@ -86,13 +86,20 @@
             } catch (e) {}
         }
 
-        if (input.includes("spotify.com")) {
+        if (input.startsWith("http://") || input.startsWith("https://")) {
             try {
                 const url = new URL(input);
-                const pathSegments = url.pathname.split("/").filter(Boolean);
-                const typeIndex = pathSegments.findIndex(seg => ["track", "album", "playlist", "artist", "episode", "show"].includes(seg));
-                if (typeIndex !== -1 && pathSegments[typeIndex + 1]) {
-                    return `spotify:${pathSegments[typeIndex]}:${pathSegments[typeIndex + 1]}`;
+                const host = url.hostname.toLowerCase();
+                const isSpotifyHost = host === "spotify.com" || host.endsWith(".spotify.com");
+
+                if (isSpotifyHost) {
+                    const pathSegments = url.pathname.split("/").filter(Boolean);
+                    const typeIndex = pathSegments.findIndex(seg =>
+                        ["track", "album", "playlist", "artist", "episode", "show"].includes(seg)
+                    );
+                    if (typeIndex !== -1 && pathSegments[typeIndex + 1]) {
+                        return `spotify:${pathSegments[typeIndex]}:${pathSegments[typeIndex + 1]}`;
+                    }
                 }
             } catch (e) {
                 console.warn("[Spicetify-WS] Error parsing Spotify URL:", e);
@@ -183,7 +190,7 @@
             socket = null;
         }
 
-        console.info(`[Spicetify-WS] Connecting to ${currentConfig.SERVER_URL}...`);
+        console.info("[Spicetify-WS] Connecting to %s...", currentConfig.SERVER_URL);
 
         try {
             socket = new WebSocket(currentConfig.SERVER_URL);
@@ -206,12 +213,12 @@
 
             socket.onclose = () => {
                 stopHeartbeat();
-                console.info(`[Spicetify-WS] Connection closed. Reconnecting in ${currentConfig.RECONNECT_INTERVAL}ms...`);
+                console.info("[Spicetify-WS] Connection closed. Reconnecting in %dms...", currentConfig.RECONNECT_INTERVAL);
                 scheduleReconnect();
             };
 
         } catch (err) {
-            console.warn(`[Spicetify-WS] Could not initiate WebSocket to ${currentConfig.SERVER_URL}:`, err.message || err);
+            console.warn("[Spicetify-WS] Could not initiate WebSocket to %s:", currentConfig.SERVER_URL, err.message || err);
             scheduleReconnect();
         }
     }
@@ -259,7 +266,7 @@
         // Token authentication check if API_KEY is set
         const currentConfig = getConfig();
         if (currentConfig.API_KEY && token !== currentConfig.API_KEY) {
-            console.warn(`[Spicetify-WS] Unauthorized request attempt for '${requestName}'. Token mismatch.`);
+            console.warn("[Spicetify-WS] Unauthorized request attempt for '%s'. Token mismatch.", requestName);
             sendResponse(requestId, false, {}, "Unauthorized: Invalid or missing API key.");
             return;
         }
@@ -372,7 +379,7 @@
                     break;
             }
         } catch (err) {
-            console.warn(`[Spicetify-WS] Error executing '${requestName}':`, err);
+            console.warn("[Spicetify-WS] Error executing '%s':", requestName, err);
             sendResponse(requestId, false, {}, err.message || "Internal error");
         }
     }

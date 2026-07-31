@@ -16,6 +16,8 @@
     // 1. CONFIGURATION & LOCAL STORAGE
     // -------------------------------------------------------------------------
 
+    const APP_VERSION = "0.2.2";
+
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
         RECONNECT_INTERVAL: "spicetify-connect-api:reconnect_interval",
@@ -67,7 +69,7 @@
         return;
     }
 
-    console.log("[Spicetify-WS] Extension successfully loaded.");
+    console.log(`[Spicetify-WS] Extension v${APP_VERSION} successfully loaded.`);
 
     // -------------------------------------------------------------------------
     // 3. HELPER FUNCTIONS
@@ -486,6 +488,10 @@
                 <input type="number" id="ws-reconnect-interval" value="${currentConfig.RECONNECT_INTERVAL}" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
             </div>
             <button id="ws-save-btn" style="padding:10px; border-radius:20px; border:none; background:#1db954; color:#000; font-weight:bold; cursor:pointer; margin-top:10px;">Save & Reconnect</button>
+            
+            <div style="text-align:right; font-size:11px; color:#666; margin-top:5px;">
+                Installed Version: v${APP_VERSION}
+            </div>
         `;
 
         Spicetify.PopupModal.display({

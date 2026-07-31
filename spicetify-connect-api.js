@@ -476,7 +476,7 @@
             <div>
                 <label style="display:block; margin-bottom:5px; font-weight:bold;">WebSocket Server URL</label>
                 <input type="text" id="ws-server-url" value="${currentConfig.SERVER_URL}" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-                <small style="color:#aaa;">Use <code>ws://127.0.0.1:9090</code> for local or <code>wss://IP:PORT</code> (or domain) for encrypted remote connections.</small>
+                <small style="color:#aaa;">Use <code>ws://127.0.0.1:9090</code> for local, <code>wss://IP:PORT:9090</code> for encrypted connections or <code>wss://DOMAIN:PORT</code> for remote connections.</small>
             </div>
             <div>
                 <label style="display:block; margin-bottom:5px; font-weight:bold;">API Key / Secret Token (Optional)</label>

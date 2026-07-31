@@ -469,7 +469,7 @@
         const content = document.createElement("div");
         content.style.display = "flex";
         content.style.flexDirection = "column";
-        content.style.gap = "15px";
+        content.style.gap = "5px";
         content.style.padding = "10px";
 
         content.innerHTML = `

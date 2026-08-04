@@ -1,54 +1,53 @@
 name: Bug Report
 description: Report a bug that you found
 labels: [bug]
-type: Bug
 
 body:
-- type: markdown
-  attributes:
-    value: |
-      - Check if the bug was already reported.
-      - Include only one bug per issue.
+  - type: markdown
+    attributes:
+      value: |
+        - Check if the bug was already reported.
+        - Include only one bug per issue.
 
-- type: input
-  attributes:
-    label: spicetify-connect-api Version
-    description: Which version of spicetify-connect-api are you using? Check the version in the Connect API settings footer.
-    placeholder: X.Y.Z
-  validations:
-    required: true
+  - type: input
+    attributes:
+      label: spicetify-connect-api Version
+      description: Which version of spicetify-connect-api are you using? Check the version in the Connect API settings footer.
+      placeholder: X.Y.Z
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Bug Description
-    description: Please provide a brief summary of the bug.
-  validations:
-    required: true
+  - type: textarea
+    attributes:
+      label: Bug Description
+      description: Please provide a brief summary of the bug.
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Reproduction Steps
-    description: Write down the steps to reproduce the bug.
-  validations:
-    required: true
+  - type: textarea
+    attributes:
+      label: Reproduction Steps
+      description: Write down the steps to reproduce the bug.
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Expected Results
-    description: What did you expect to happen?
-  validations:
-    required: true
+  - type: textarea
+    attributes:
+      label: Expected Results
+      description: What did you expect to happen?
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: Actual Results
-    description: What actually happened?
-  validations:
-    required: true
+  - type: textarea
+    attributes:
+      label: Actual Results
+      description: What actually happened?
+    validations:
+      required: true
 
-- type: textarea
-  attributes:
-    label: error traceback
-    description: If the bug caused an error, please provide the full traceback. Enable devtools with ``spicetify enable-devtools`` and right click in Spotify and select ``Show DevTools`` and click on the ``Console`` tab to see the traceback.
-  validations:
-    required: false
+  - type: textarea
+    attributes:
+      label: error traceback
+      description: If the bug caused an error, please provide the full traceback. Enable devtools with `spicetify enable-devtools` and right click in Spotify and select `Show DevTools` and click on the `Console` tab to see the traceback.
+    validations:
+      required: false

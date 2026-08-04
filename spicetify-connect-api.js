@@ -1,10 +1,10 @@
 /**
- * spicetify-connect-api
+ * spicetify-connect-api (v0.3.0)
  * Bridge between Spotify Desktop Client (Spicetify) and Python WebSocket Server.
  *
  * Installation:
  * 1. Save this file as 'spicetify-connect-api.js' in the Spicetify Extensions folder:
- * - Windows: C:\Users\%username%\AppData\Roaming\spicetify\Extensions\
+ * - Windows: %appdata%\spicetify\Extensions\
  * - Linux/macOS: ~/.config/spicetify/Extensions/
  * 2. Enable and apply the extension:
  * spicetify config extensions spicetify-connect-api.js
@@ -16,7 +16,7 @@
     // 1. CONFIGURATION & LOCAL STORAGE
     // -------------------------------------------------------------------------
 
-    const APP_VERSION = "0.2.2";
+    const APP_VERSION = "0.3.0";
 
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
@@ -83,7 +83,10 @@
             try {
                 const uriObj = Spicetify.URI.from(input);
                 if (uriObj && typeof uriObj.toURI === "function") {
-                    return uriObj.toURI();
+                    const resolved = uriObj.toURI();
+                    if (resolved && resolved.startsWith("spotify:")) {
+                        return resolved;
+                    }
                 }
             } catch (e) {}
         }
@@ -92,7 +95,14 @@
             try {
                 const url = new URL(input);
                 const host = url.hostname.toLowerCase();
-                const isSpotifyHost = host === "spotify.com" || host.endsWith(".spotify.com");
+
+                const isSpotifyHost =
+                    host === "open.spotify.com" ||
+                    host.endsWith(".open.spotify.com") ||
+                    host === "spotify.com" ||
+                    host.endsWith(".spotify.com") ||
+                    host === "spotify.link" ||
+                    host.endsWith(".spotify.link");
 
                 if (isSpotifyHost) {
                     const pathSegments = url.pathname.split("/").filter(Boolean);
@@ -106,20 +116,29 @@
             } catch (e) {
                 console.warn("[Spicetify-WS] Error parsing Spotify URL:", e);
             }
+            return null;
         }
 
-        return input;
+        return null;
     }
 
     function getFullPlayerState() {
         let patchedPlayerData = null;
+        const currentProgress = Spicetify.Player.getProgress();
+        const currentVolume = Spicetify.Player.getVolume();
+        const currentMute = typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false;
+        const currentHeart = typeof Spicetify.Player.getHeart === "function" ? Spicetify.Player.getHeart() : false;
 
         if (Spicetify.Player.data) {
-            const currentProgress = Spicetify.Player.getProgress();
             patchedPlayerData = {
                 ...Spicetify.Player.data,
                 position_as_of_timestamp: currentProgress,
                 positionAsOfTimestamp: currentProgress,
+                volume: currentVolume,
+                is_muted: currentMute,
+                isMuted: currentMute,
+                is_hearted: currentHeart,
+                isHearted: currentHeart,
                 timestamp: Date.now()
             };
         }
@@ -127,11 +146,12 @@
         return {
             playerData: patchedPlayerData,
             isPlaying: Spicetify.Player.isPlaying(),
-            volume: Spicetify.Player.getVolume(),
-            isMuted: typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false,
+            volume: currentVolume,
+            isMuted: currentMute,
+            isHearted: currentHeart,
             shuffle: Spicetify.Player.getShuffle(),
             repeat: Spicetify.Player.getRepeat(),
-            progress: Spicetify.Player.getProgress()
+            progress: currentProgress
         };
     }
 
@@ -236,9 +256,8 @@
     function startHeartbeat() {
         stopHeartbeat();
         pingTimer = setInterval(() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                sendEvent("Ping", { timestamp: Date.now() });
-            }
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            sendEvent("Ping", { timestamp: Date.now() });
         }, 30000);
     }
 
@@ -346,6 +365,27 @@
                         sendResponse(requestId, false, {}, "Parameter 'state' must be a boolean.");
                     }
                     break;
+                case "SetHeart":
+                    if (typeof payload.status === "boolean") {
+                        if (typeof Spicetify.Player.setHeart === "function") {
+                            Spicetify.Player.setHeart(payload.status);
+                            sendResponse(requestId, true, { isHearted: payload.status });
+                        } else {
+                            sendResponse(requestId, false, {}, "Spicetify Heart API is not available.");
+                        }
+                    } else {
+                        sendResponse(requestId, false, {}, "Parameter 'status' must be a boolean.");
+                    }
+                    break;
+                case "ToggleHeart":
+                    if (typeof Spicetify.Player.getHeart === "function" && typeof Spicetify.Player.setHeart === "function") {
+                        const newHeartState = !Spicetify.Player.getHeart();
+                        Spicetify.Player.setHeart(newHeartState);
+                        sendResponse(requestId, true, { isHearted: newHeartState });
+                    } else {
+                        sendResponse(requestId, false, {}, "Spicetify Heart API is not available.");
+                    }
+                    break;
                 case "PlayUri":
                     const rawUri = payload.uri || payload.url;
                     const formattedUri = toSpotifyUri(rawUri);
@@ -376,6 +416,13 @@
                 case "GetPlayPause":
                     sendResponse(requestId, true, { isPlaying: Spicetify.Player.isPlaying() });
                     break;
+                case "GetHeart":
+                    if (typeof Spicetify.Player.getHeart === "function") {
+                        sendResponse(requestId, true, { isHearted: Spicetify.Player.getHeart() });
+                    } else {
+                        sendResponse(requestId, false, { isHearted: false }, "Spicetify Heart API is not available.");
+                    }
+                    break;
                 default:
                     sendResponse(requestId, false, {}, `Unknown command '${requestName}'`);
                     break;
@@ -387,31 +434,26 @@
     }
 
     // -------------------------------------------------------------------------
-    // 6. EVENT LISTENERS
+    // 6. EVENT LISTENERS (v0.3.0 Full State Architecture)
     // -------------------------------------------------------------------------
 
     let lastRepeat = null;
     let lastShuffle = null;
+    let lastHeart = null;
     let lastProgress = 0;
     let lastProgressTime = Date.now();
 
     function setupEventListeners() {
-        Spicetify.Player.addEventListener("songchange", (event) => {
+        Spicetify.Player.addEventListener("songchange", () => {
             lastProgress = 0;
             lastProgressTime = Date.now();
-            sendEvent("SongChanged", {
-                track: event?.data?.item || Spicetify.Player.data?.item || null,
-                playerState: Spicetify.Player.data
-            });
+            sendEvent("SongChanged", getFullPlayerState());
         });
 
         Spicetify.Player.addEventListener("onplaypause", () => {
             lastProgress = Spicetify.Player.getProgress();
             lastProgressTime = Date.now();
-            sendEvent("PlayPauseChanged", {
-                isPlaying: Spicetify.Player.isPlaying(),
-                playerState: Spicetify.Player.data
-            });
+            sendEvent("PlayPauseChanged", getFullPlayerState());
         });
 
         Spicetify.Player.addEventListener("onprogress", (event) => {
@@ -421,7 +463,7 @@
             const expectedProgress = Spicetify.Player.isPlaying() ? lastProgress + timePassed : lastProgress;
 
             if (Math.abs(currentProgress - expectedProgress) > 1500) {
-                sendEvent("SeekChanged", { position: currentProgress });
+                sendEvent("SeekChanged", getFullPlayerState());
             }
 
             lastProgress = currentProgress;
@@ -437,14 +479,14 @@
                 lastVolume = currentVolume;
                 if (volumeDebounceTimer) clearTimeout(volumeDebounceTimer);
                 volumeDebounceTimer = setTimeout(() => {
-                    sendEvent("VolumeChanged", { level: currentVolume });
+                    sendEvent("VolumeChanged", getFullPlayerState());
                 }, currentConfig.VOLUME_DEBOUNCE_MS);
             }
 
             const currentRepeat = Spicetify.Player.getRepeat();
             if (lastRepeat !== null && currentRepeat !== lastRepeat) {
                 lastRepeat = currentRepeat;
-                sendEvent("RepeatChanged", { mode: currentRepeat });
+                sendEvent("RepeatChanged", getFullPlayerState());
             } else if (lastRepeat === null) {
                 lastRepeat = currentRepeat;
             }
@@ -452,9 +494,19 @@
             const currentShuffle = Spicetify.Player.getShuffle();
             if (lastShuffle !== null && currentShuffle !== lastShuffle) {
                 lastShuffle = currentShuffle;
-                sendEvent("ShuffleChanged", { state: currentShuffle });
+                sendEvent("ShuffleChanged", getFullPlayerState());
             } else if (lastShuffle === null) {
                 lastShuffle = currentShuffle;
+            }
+
+            if (typeof Spicetify.Player.getHeart === "function") {
+                const currentHeart = Spicetify.Player.getHeart();
+                if (lastHeart !== null && currentHeart !== lastHeart) {
+                    lastHeart = currentHeart;
+                    sendEvent("HeartChanged", getFullPlayerState());
+                } else if (lastHeart === null) {
+                    lastHeart = currentHeart;
+                }
             }
         }, DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL);
     }

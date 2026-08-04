@@ -47,7 +47,7 @@ You can configure the extension directly within Spotify:
 1. Download [spicetify-connect-api.js](https://github.com/tobfd/spicetify-connect-api/releases/latest/download/spicetify-connect-api.js).
 
 2. Place the file in the appropriate path for your operating system:
-    - **Windows**: `C:\Users\%username%\AppData\Roaming\spicetify\Extensions\` (Paste in `Win + R`)
+    - **Windows**: `%appdata%\spicetify\Extensions\` (Paste in `Win + R`)
     - **Linux / macOS**: `~/.config/spicetify/Extensions/`
 
 3. Enable the extension in your terminal:

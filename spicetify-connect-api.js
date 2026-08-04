@@ -1,10 +1,10 @@
 /**
- * spicetify-connect-api
+ * spicetify-connect-api (v0.3.0)
  * Bridge between Spotify Desktop Client (Spicetify) and Python WebSocket Server.
  *
  * Installation:
  * 1. Save this file as 'spicetify-connect-api.js' in the Spicetify Extensions folder:
- * - Windows: C:\Users\%username%\AppData\Roaming\spicetify\Extensions\
+ * - Windows: %appdata%\spicetify\Extensions\
  * - Linux/macOS: ~/.config/spicetify/Extensions/
  * 2. Enable and apply the extension:
  * spicetify config extensions spicetify-connect-api.js
@@ -16,7 +16,7 @@
     // 1. CONFIGURATION & LOCAL STORAGE
     // -------------------------------------------------------------------------
 
-    const APP_VERSION = "0.2.2";
+    const APP_VERSION = "0.3.0";
 
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
@@ -92,7 +92,13 @@
             try {
                 const url = new URL(input);
                 const host = url.hostname.toLowerCase();
-                const isSpotifyHost = host === "spotify.com" || host.endsWith(".spotify.com");
+
+                // Saubere Domain-Prüfung für echte Spotify-Links (open.spotify.com, spotify.com)
+                const isSpotifyHost =
+                    host === "open.spotify.com" ||
+                    host.endsWith(".open.spotify.com") ||
+                    host === "spotify.com" ||
+                    host.endsWith(".spotify.com");
 
                 if (isSpotifyHost) {
                     const pathSegments = url.pathname.split("/").filter(Boolean);
@@ -113,6 +119,8 @@
 
     function getFullPlayerState() {
         let patchedPlayerData = null;
+        const currentVolume = Spicetify.Player.getVolume();
+        const currentMute = typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false;
 
         if (Spicetify.Player.data) {
             const currentProgress = Spicetify.Player.getProgress();
@@ -120,6 +128,9 @@
                 ...Spicetify.Player.data,
                 position_as_of_timestamp: currentProgress,
                 positionAsOfTimestamp: currentProgress,
+                volume: currentVolume,
+                is_muted: currentMute,
+                isMuted: currentMute,
                 timestamp: Date.now()
             };
         }
@@ -127,8 +138,8 @@
         return {
             playerData: patchedPlayerData,
             isPlaying: Spicetify.Player.isPlaying(),
-            volume: Spicetify.Player.getVolume(),
-            isMuted: typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false,
+            volume: currentVolume,
+            isMuted: currentMute,
             shuffle: Spicetify.Player.getShuffle(),
             repeat: Spicetify.Player.getRepeat(),
             progress: Spicetify.Player.getProgress()
@@ -387,7 +398,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // 6. EVENT LISTENERS
+    // 6. EVENT LISTENERS (v0.3.0 Full State Architecture)
     // -------------------------------------------------------------------------
 
     let lastRepeat = null;
@@ -396,22 +407,16 @@
     let lastProgressTime = Date.now();
 
     function setupEventListeners() {
-        Spicetify.Player.addEventListener("songchange", (event) => {
+        Spicetify.Player.addEventListener("songchange", () => {
             lastProgress = 0;
             lastProgressTime = Date.now();
-            sendEvent("SongChanged", {
-                track: event?.data?.item || Spicetify.Player.data?.item || null,
-                playerState: Spicetify.Player.data
-            });
+            sendEvent("SongChanged", getFullPlayerState());
         });
 
         Spicetify.Player.addEventListener("onplaypause", () => {
             lastProgress = Spicetify.Player.getProgress();
             lastProgressTime = Date.now();
-            sendEvent("PlayPauseChanged", {
-                isPlaying: Spicetify.Player.isPlaying(),
-                playerState: Spicetify.Player.data
-            });
+            sendEvent("PlayPauseChanged", getFullPlayerState());
         });
 
         Spicetify.Player.addEventListener("onprogress", (event) => {
@@ -421,7 +426,7 @@
             const expectedProgress = Spicetify.Player.isPlaying() ? lastProgress + timePassed : lastProgress;
 
             if (Math.abs(currentProgress - expectedProgress) > 1500) {
-                sendEvent("SeekChanged", { position: currentProgress });
+                sendEvent("SeekChanged", getFullPlayerState());
             }
 
             lastProgress = currentProgress;
@@ -437,14 +442,14 @@
                 lastVolume = currentVolume;
                 if (volumeDebounceTimer) clearTimeout(volumeDebounceTimer);
                 volumeDebounceTimer = setTimeout(() => {
-                    sendEvent("VolumeChanged", { level: currentVolume });
+                    sendEvent("VolumeChanged", getFullPlayerState());
                 }, currentConfig.VOLUME_DEBOUNCE_MS);
             }
 
             const currentRepeat = Spicetify.Player.getRepeat();
             if (lastRepeat !== null && currentRepeat !== lastRepeat) {
                 lastRepeat = currentRepeat;
-                sendEvent("RepeatChanged", { mode: currentRepeat });
+                sendEvent("RepeatChanged", getFullPlayerState());
             } else if (lastRepeat === null) {
                 lastRepeat = currentRepeat;
             }
@@ -452,7 +457,7 @@
             const currentShuffle = Spicetify.Player.getShuffle();
             if (lastShuffle !== null && currentShuffle !== lastShuffle) {
                 lastShuffle = currentShuffle;
-                sendEvent("ShuffleChanged", { state: currentShuffle });
+                sendEvent("ShuffleChanged", getFullPlayerState());
             } else if (lastShuffle === null) {
                 lastShuffle = currentShuffle;
             }

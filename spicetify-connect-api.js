@@ -93,12 +93,9 @@
                 const url = new URL(input);
                 const host = url.hostname.toLowerCase();
 
-                // Saubere Domain-Prüfung für echte Spotify-Links (open.spotify.com, spotify.com)
                 const isSpotifyHost =
                     host === "open.spotify.com" ||
-                    host.endsWith(".open.spotify.com") ||
-                    host === "spotify.com" ||
-                    host.endsWith(".spotify.com");
+                    host.endsWith(".open.spotify.com");
 
                 if (isSpotifyHost) {
                     const pathSegments = url.pathname.split("/").filter(Boolean);
@@ -121,6 +118,7 @@
         let patchedPlayerData = null;
         const currentVolume = Spicetify.Player.getVolume();
         const currentMute = typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false;
+        const currentHeart = typeof Spicetify.Player.getHeart === "function" ? Spicetify.Player.getHeart() : false;
 
         if (Spicetify.Player.data) {
             const currentProgress = Spicetify.Player.getProgress();
@@ -131,6 +129,8 @@
                 volume: currentVolume,
                 is_muted: currentMute,
                 isMuted: currentMute,
+                is_hearted: currentHeart,
+                isHearted: currentHeart,
                 timestamp: Date.now()
             };
         }
@@ -140,6 +140,7 @@
             isPlaying: Spicetify.Player.isPlaying(),
             volume: currentVolume,
             isMuted: currentMute,
+            isHearted: currentHeart,
             shuffle: Spicetify.Player.getShuffle(),
             repeat: Spicetify.Player.getRepeat(),
             progress: Spicetify.Player.getProgress()
@@ -247,9 +248,8 @@
     function startHeartbeat() {
         stopHeartbeat();
         pingTimer = setInterval(() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                sendEvent("Ping", { timestamp: Date.now() });
-            }
+            if (socket && socket.readyState !== WebSocket.OPEN) return;
+            sendEvent("Ping", { timestamp: Date.now() });
         }, 30000);
     }
 
@@ -357,6 +357,27 @@
                         sendResponse(requestId, false, {}, "Parameter 'state' must be a boolean.");
                     }
                     break;
+                case "SetHeart":
+                    if (typeof payload.status === "boolean") {
+                        if (typeof Spicetify.Player.setHeart === "function") {
+                            Spicetify.Player.setHeart(payload.status);
+                            sendResponse(requestId, true, { isHearted: payload.status });
+                        } else {
+                            sendResponse(requestId, false, {}, "Spicetify Heart API is not available.");
+                        }
+                    } else {
+                        sendResponse(requestId, false, {}, "Parameter 'status' must be a boolean.");
+                    }
+                    break;
+                case "ToggleHeart":
+                    if (typeof Spicetify.Player.getHeart === "function" && typeof Spicetify.Player.setHeart === "function") {
+                        const newHeartState = !Spicetify.Player.getHeart();
+                        Spicetify.Player.setHeart(newHeartState);
+                        sendResponse(requestId, true, { isHearted: newHeartState });
+                    } else {
+                        sendResponse(requestId, false, {}, "Spicetify Heart API is not available.");
+                    }
+                    break;
                 case "PlayUri":
                     const rawUri = payload.uri || payload.url;
                     const formattedUri = toSpotifyUri(rawUri);
@@ -387,6 +408,13 @@
                 case "GetPlayPause":
                     sendResponse(requestId, true, { isPlaying: Spicetify.Player.isPlaying() });
                     break;
+                case "GetHeart":
+                    if (typeof Spicetify.Player.getHeart === "function") {
+                        sendResponse(requestId, true, { isHearted: Spicetify.Player.getHeart() });
+                    } else {
+                        sendResponse(requestId, false, { isHearted: false }, "Spicetify Heart API is not available.");
+                    }
+                    break;
                 default:
                     sendResponse(requestId, false, {}, `Unknown command '${requestName}'`);
                     break;
@@ -403,6 +431,7 @@
 
     let lastRepeat = null;
     let lastShuffle = null;
+    let lastHeart = null;
     let lastProgress = 0;
     let lastProgressTime = Date.now();
 
@@ -460,6 +489,16 @@
                 sendEvent("ShuffleChanged", getFullPlayerState());
             } else if (lastShuffle === null) {
                 lastShuffle = currentShuffle;
+            }
+
+            if (typeof Spicetify.Player.getHeart === "function") {
+                const currentHeart = Spicetify.Player.getHeart();
+                if (lastHeart !== null && currentHeart !== lastHeart) {
+                    lastHeart = currentHeart;
+                    sendEvent("HeartChanged", getFullPlayerState());
+                } else if (lastHeart === null) {
+                    lastHeart = currentHeart;
+                }
             }
         }, DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL);
     }

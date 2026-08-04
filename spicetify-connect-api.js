@@ -83,7 +83,10 @@
             try {
                 const uriObj = Spicetify.URI.from(input);
                 if (uriObj && typeof uriObj.toURI === "function") {
-                    return uriObj.toURI();
+                    const resolved = uriObj.toURI();
+                    if (resolved && resolved.startsWith("spotify:")) {
+                        return resolved;
+                    }
                 }
             } catch (e) {}
         }
@@ -95,7 +98,11 @@
 
                 const isSpotifyHost =
                     host === "open.spotify.com" ||
-                    host.endsWith(".open.spotify.com");
+                    host.endsWith(".open.spotify.com") ||
+                    host === "spotify.com" ||
+                    host.endsWith(".spotify.com") ||
+                    host === "spotify.link" ||
+                    host.endsWith(".spotify.link");
 
                 if (isSpotifyHost) {
                     const pathSegments = url.pathname.split("/").filter(Boolean);
@@ -109,19 +116,20 @@
             } catch (e) {
                 console.warn("[Spicetify-WS] Error parsing Spotify URL:", e);
             }
+            return null;
         }
 
-        return input;
+        return null;
     }
 
     function getFullPlayerState() {
         let patchedPlayerData = null;
+        const currentProgress = Spicetify.Player.getProgress();
         const currentVolume = Spicetify.Player.getVolume();
         const currentMute = typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false;
         const currentHeart = typeof Spicetify.Player.getHeart === "function" ? Spicetify.Player.getHeart() : false;
 
         if (Spicetify.Player.data) {
-            const currentProgress = Spicetify.Player.getProgress();
             patchedPlayerData = {
                 ...Spicetify.Player.data,
                 position_as_of_timestamp: currentProgress,
@@ -143,7 +151,7 @@
             isHearted: currentHeart,
             shuffle: Spicetify.Player.getShuffle(),
             repeat: Spicetify.Player.getRepeat(),
-            progress: Spicetify.Player.getProgress()
+            progress: currentProgress
         };
     }
 
@@ -248,7 +256,7 @@
     function startHeartbeat() {
         stopHeartbeat();
         pingTimer = setInterval(() => {
-            if (socket && socket.readyState !== WebSocket.OPEN) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
             sendEvent("Ping", { timestamp: Date.now() });
         }, 30000);
     }

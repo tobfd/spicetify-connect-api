@@ -1,5 +1,5 @@
 /**
- * spicetify-connect-api (v0.3.0)
+ * spicetify-connect-api (v0.3.1)
  * Bridge between Spotify Desktop Client (Spicetify) and Python WebSocket Server.
  *
  * Installation:
@@ -16,7 +16,7 @@
     // 1. CONFIGURATION & LOCAL STORAGE
     // -------------------------------------------------------------------------
 
-    const APP_VERSION = "0.3.0";
+    const APP_VERSION = "0.3.1";
 
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
@@ -331,7 +331,6 @@
                 case "SetVolume":
                     if (typeof payload.level === "number" && payload.level >= 0 && payload.level <= 1) {
                         Spicetify.Player.setVolume(payload.level);
-                        lastVolume = payload.level;
                         sendResponse(requestId, true, { level: payload.level });
                     } else {
                         sendResponse(requestId, false, {}, "Parameter 'level' must be between 0.0 and 1.0.");

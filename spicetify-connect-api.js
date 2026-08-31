@@ -1,14 +1,14 @@
 /**
- * spicetify-connect-api (v0.3.1)
- * Bridge between Spotify Desktop Client (Spicetify) and Python WebSocket Server.
+ * spicetify-connect-api (v0.3.2)
+ * Bridge between Spotify Desktop Client (Spicetify) and WebSocket Server (e.g., Python / Home Assistant).
  *
  * Installation:
  * 1. Save this file as 'spicetify-connect-api.js' in the Spicetify Extensions folder:
- * - Windows: %appdata%\spicetify\Extensions\
- * - Linux/macOS: ~/.config/spicetify/Extensions/
+ *    - Windows: %appdata%\spicetify\Extensions\
+ *    - Linux/macOS: ~/.config/spicetify/Extensions/
  * 2. Enable and apply the extension:
- * spicetify config extensions spicetify-connect-api.js
- * spicetify apply
+ *    spicetify config extensions spicetify-connect-api.js
+ *    spicetify apply
  */
 
 (function SpicetifyWebSocketExtension() {
@@ -16,7 +16,7 @@
     // 1. CONFIGURATION & LOCAL STORAGE
     // -------------------------------------------------------------------------
 
-    const APP_VERSION = "0.3.1";
+    const APP_VERSION = "0.3.2";
 
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
@@ -50,7 +50,10 @@
     let reconnectTimer = null;
     let volumeDebounceTimer = null;
     let pingTimer = null;
+    let statePollInterval = null;
     let lastVolume = null;
+    let preMuteVolume = 0.5;
+    let isInitialized = false;
 
     // -------------------------------------------------------------------------
     // 2. SPICETIFY INITIALIZATION GUARD
@@ -74,6 +77,16 @@
     // -------------------------------------------------------------------------
     // 3. HELPER FUNCTIONS
     // -------------------------------------------------------------------------
+
+    function isSecureOrLocalWs(url) {
+        try {
+            const u = new URL(url);
+            const isLocal = ["127.0.0.1", "localhost", "::1"].includes(u.hostname);
+            return u.protocol === "wss:" || (u.protocol === "ws:" && isLocal);
+        } catch {
+            return false;
+        }
+    }
 
     function toSpotifyUri(input) {
         if (!input || typeof input !== "string") return null;
@@ -212,6 +225,12 @@
             socket = null;
         }
 
+        if (!isSecureOrLocalWs(currentConfig.SERVER_URL)) {
+            console.warn(
+                "[Spicetify-WS] Warning: Spotify's internal CEF browser blocks unencrypted remote ws:// endpoints. Use wss:// for remote connections."
+            );
+        }
+
         console.info("[Spicetify-WS] Connecting to %s...", currentConfig.SERVER_URL);
 
         try {
@@ -223,6 +242,7 @@
                 Spicetify.showNotification("Connect API: Server connected!");
                 sendEvent("InitialState", getFullPlayerState());
                 lastVolume = Spicetify.Player.getVolume();
+                if (lastVolume > 0) preMuteVolume = lastVolume;
             };
 
             socket.onmessage = (event) => {
@@ -281,6 +301,8 @@
             return;
         }
 
+        if (!request || typeof request !== "object" || Array.isArray(request)) return;
+
         const { requestName, requestId, token, payload = {} } = request;
         if (!requestName) return;
 
@@ -329,8 +351,9 @@
                     sendResponse(requestId, true);
                     break;
                 case "SetVolume":
-                    if (typeof payload.level === "number" && payload.level >= 0 && payload.level <= 1) {
+                    if (typeof payload.level === "number" && Number.isFinite(payload.level) && payload.level >= 0 && payload.level <= 1) {
                         Spicetify.Player.setVolume(payload.level);
+                        if (payload.level > 0) preMuteVolume = payload.level;
                         sendResponse(requestId, true, { level: payload.level });
                     } else {
                         sendResponse(requestId, false, {}, "Parameter 'level' must be between 0.0 and 1.0.");
@@ -357,7 +380,13 @@
                         if (typeof Spicetify.Player.setMute === "function") {
                             Spicetify.Player.setMute(payload.state);
                         } else {
-                            Spicetify.Player.setVolume(payload.state ? 0 : (lastVolume || 0.5));
+                            if (payload.state) {
+                                const currentVol = Spicetify.Player.getVolume();
+                                if (currentVol > 0) preMuteVolume = currentVol;
+                                Spicetify.Player.setVolume(0);
+                            } else {
+                                Spicetify.Player.setVolume(preMuteVolume || 0.5);
+                            }
                         }
                         sendResponse(requestId, true, { isMuted: payload.state });
                     } else {
@@ -396,11 +425,12 @@
                     }
                     break;
                 case "Seek":
-                    if (typeof payload.position === "number") {
-                        Spicetify.Player.seek(payload.position);
-                        sendResponse(requestId, true, { position: payload.position });
+                    if (typeof payload.position === "number" && Number.isFinite(payload.position) && payload.position >= 0) {
+                        const targetPos = Math.round(payload.position);
+                        Spicetify.Player.seek(targetPos);
+                        sendResponse(requestId, true, { position: targetPos });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'position' (ms) is missing.");
+                        sendResponse(requestId, false, {}, "Parameter 'position' must be a non-negative number (ms).");
                     }
                     break;
                 case "GetPlayerState":
@@ -433,7 +463,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // 6. EVENT LISTENERS (v0.3.0 Full State Architecture)
+    // 6. EVENT LISTENERS (v0.3.0+ Full State Architecture)
     // -------------------------------------------------------------------------
 
     let lastRepeat = null;
@@ -443,6 +473,9 @@
     let lastProgressTime = Date.now();
 
     function setupEventListeners() {
+        if (isInitialized) return;
+        isInitialized = true;
+
         Spicetify.Player.addEventListener("songchange", () => {
             lastProgress = 0;
             lastProgressTime = Date.now();
@@ -469,17 +502,21 @@
             lastProgressTime = now;
         });
 
-        setInterval(() => {
+        statePollInterval = setInterval(() => {
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
             const currentConfig = getConfig();
 
             const currentVolume = Spicetify.Player.getVolume();
             if (lastVolume !== null && Math.abs(currentVolume - lastVolume) > 0.001) {
                 lastVolume = currentVolume;
+                if (currentVolume > 0) preMuteVolume = currentVolume;
                 if (volumeDebounceTimer) clearTimeout(volumeDebounceTimer);
                 volumeDebounceTimer = setTimeout(() => {
                     sendEvent("VolumeChanged", getFullPlayerState());
                 }, currentConfig.VOLUME_DEBOUNCE_MS);
+            } else if (lastVolume === null) {
+                lastVolume = currentVolume;
+                if (currentVolume > 0) preMuteVolume = currentVolume;
             }
 
             const currentRepeat = Spicetify.Player.getRepeat();
@@ -510,6 +547,23 @@
         }, DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL);
     }
 
+    function teardown() {
+        if (statePollInterval) {
+            clearInterval(statePollInterval);
+            statePollInterval = null;
+        }
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        if (volumeDebounceTimer) {
+            clearTimeout(volumeDebounceTimer);
+            volumeDebounceTimer = null;
+        }
+        stopHeartbeat();
+        isInitialized = false;
+    }
+
     // -------------------------------------------------------------------------
     // 7. UI SETTINGS INTEGRATION (PROFILE MENU)
     // -------------------------------------------------------------------------
@@ -517,59 +571,174 @@
     function openSettingsModal() {
         const currentConfig = getConfig();
 
-        const content = document.createElement("div");
-        content.style.display = "flex";
-        content.style.flexDirection = "column";
-        content.style.gap = "5px";
-        content.style.padding = "10px";
+        const container = document.createElement("div");
+        container.style.display = "flex";
+        container.style.flexDirection = "column";
+        container.style.gap = "8px";
+        container.style.padding = "10px";
 
-        content.innerHTML = `
-            <div>
-                <label style="display:block; margin-bottom:5px; font-weight:bold;">WebSocket Server URL</label>
-                <input type="text" id="ws-server-url" value="${currentConfig.SERVER_URL}" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-                <small style="color:#aaa;">Use <code>ws://127.0.0.1:9090</code> for local, <code>wss://IP:PORT:9090</code> for encrypted connections or <code>wss://DOMAIN:PORT</code> for remote connections.</small>
-            </div>
-            <div>
-                <label style="display:block; margin-bottom:5px; font-weight:bold;">API Key / Secret Token (Optional)</label>
-                <input type="password" id="ws-api-key" value="${currentConfig.API_KEY}" placeholder="Leave empty if authentication is disabled" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-                <small style="color:#aaa;">Optional security token sent with outbound events and required for incoming commands.</small>
-            </div>
-            <div>
-                <label style="display:block; margin-bottom:5px; font-weight:bold;">Reconnect Interval (ms)</label>
-                <input type="number" id="ws-reconnect-interval" value="${currentConfig.RECONNECT_INTERVAL}" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-            </div>
-            <button id="ws-save-btn" style="padding:10px; border-radius:20px; border:none; background:#1db954; color:#000; font-weight:bold; cursor:pointer; margin-top:10px;">Save & Reconnect</button>
-            
-            <div style="text-align:right; font-size:11px; color:#666; margin-top:5px;">
-                Installed Version: v${APP_VERSION}
-            </div>
-        `;
+        // Server URL Section
+        const urlGroup = document.createElement("div");
+        const urlLabel = document.createElement("label");
+        urlLabel.textContent = "WebSocket Server URL";
+        urlLabel.style.display = "block";
+        urlLabel.style.marginBottom = "4px";
+        urlLabel.style.fontWeight = "bold";
+
+        const urlInput = document.createElement("input");
+        urlInput.type = "text";
+        urlInput.id = "ws-server-url";
+        urlInput.value = currentConfig.SERVER_URL;
+        urlInput.style.width = "100%";
+        urlInput.style.padding = "8px";
+        urlInput.style.borderRadius = "4px";
+        urlInput.style.border = "1px solid #444";
+        urlInput.style.background = "#222";
+        urlInput.style.color = "#fff";
+
+        const urlHelp = document.createElement("small");
+        urlHelp.style.color = "#aaa";
+        urlHelp.innerHTML = "Use <code>ws://127.0.0.1:9090</code> for local, <code>wss://IP:PORT:9090</code> for encrypted connections or <code>wss://DOMAIN:PORT</code> for remote connections.";
+
+        urlGroup.appendChild(urlLabel);
+        urlGroup.appendChild(urlInput);
+        urlGroup.appendChild(urlHelp);
+
+        // API Key Section
+        const keyGroup = document.createElement("div");
+        const keyLabel = document.createElement("label");
+        keyLabel.textContent = "API Key / Secret Token (Optional)";
+        keyLabel.style.display = "block";
+        keyLabel.style.marginBottom = "4px";
+        keyLabel.style.fontWeight = "bold";
+
+        const keyInput = document.createElement("input");
+        keyInput.type = "password";
+        keyInput.id = "ws-api-key";
+        keyInput.value = currentConfig.API_KEY;
+        keyInput.placeholder = "Leave empty if authentication is disabled";
+        keyInput.style.width = "100%";
+        keyInput.style.padding = "8px";
+        keyInput.style.borderRadius = "4px";
+        keyInput.style.border = "1px solid #444";
+        keyInput.style.background = "#222";
+        keyInput.style.color = "#fff";
+
+        const keyHelp = document.createElement("small");
+        keyHelp.style.color = "#aaa";
+        keyHelp.textContent = "Optional security token sent with outbound events and required for incoming commands.";
+
+        keyGroup.appendChild(keyLabel);
+        keyGroup.appendChild(keyInput);
+        keyGroup.appendChild(keyHelp);
+
+        // Reconnect Interval Section
+        const intervalGroup = document.createElement("div");
+        const intervalLabel = document.createElement("label");
+        intervalLabel.textContent = "Reconnect Interval (ms)";
+        intervalLabel.style.display = "block";
+        intervalLabel.style.marginBottom = "4px";
+        intervalLabel.style.fontWeight = "bold";
+
+        const intervalInput = document.createElement("input");
+        intervalInput.type = "number";
+        intervalInput.id = "ws-reconnect-interval";
+        intervalInput.value = String(currentConfig.RECONNECT_INTERVAL);
+        intervalInput.style.width = "100%";
+        intervalInput.style.padding = "8px";
+        intervalInput.style.borderRadius = "4px";
+        intervalInput.style.border = "1px solid #444";
+        intervalInput.style.background = "#222";
+        intervalInput.style.color = "#fff";
+
+        intervalGroup.appendChild(intervalLabel);
+        intervalGroup.appendChild(intervalInput);
+
+        // Save Button
+        const saveBtn = document.createElement("button");
+        saveBtn.id = "ws-save-btn";
+        saveBtn.textContent = "Save & Reconnect";
+        saveBtn.style.padding = "10px";
+        saveBtn.style.borderRadius = "20px";
+        saveBtn.style.border = "none";
+        saveBtn.style.background = "#1db954";
+        saveBtn.style.color = "#000";
+        saveBtn.style.fontWeight = "bold";
+        saveBtn.style.cursor = "pointer";
+        saveBtn.style.marginTop = "8px";
+
+        saveBtn.onclick = () => {
+            const newUrl = urlInput.value.trim();
+            const newApiKey = keyInput.value.trim();
+            const newInterval = intervalInput.value.trim();
+
+            if (newUrl) Spicetify.LocalStorage.set(STORAGE_KEYS.SERVER_URL, newUrl);
+            Spicetify.LocalStorage.set(STORAGE_KEYS.API_KEY, newApiKey);
+            if (newInterval) Spicetify.LocalStorage.set(STORAGE_KEYS.RECONNECT_INTERVAL, newInterval);
+
+            Spicetify.PopupModal.hide();
+            Spicetify.showNotification("Settings saved! Reconnecting...");
+
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            connect();
+        };
+
+        // Version Footer
+        const versionFooter = document.createElement("div");
+        versionFooter.style.textAlign = "right";
+        versionFooter.style.fontSize = "11px";
+        versionFooter.style.color = "#666";
+        versionFooter.style.marginTop = "4px";
+        versionFooter.textContent = `Installed Version: v${APP_VERSION}`;
+
+        container.appendChild(urlGroup);
+        container.appendChild(keyGroup);
+        container.appendChild(intervalGroup);
+        container.appendChild(saveBtn);
+        container.appendChild(versionFooter);
 
         Spicetify.PopupModal.display({
             title: "Connect API Settings",
-            content: content
+            content: container
         });
 
+        // Style the close button inside the modal cleanly
         setTimeout(() => {
-            const saveBtn = document.getElementById("ws-save-btn");
-            if (saveBtn) {
-                saveBtn.onclick = () => {
-                    const newUrl = document.getElementById("ws-server-url").value.trim();
-                    const newApiKey = document.getElementById("ws-api-key").value.trim();
-                    const newInterval = document.getElementById("ws-reconnect-interval").value.trim();
+            const modalRoot = document.querySelector("#spicetify-modal-root, .GenericModal__overlay, [data-testid='modal-container']");
+            if (!modalRoot) return;
 
-                    if (newUrl) Spicetify.LocalStorage.set(STORAGE_KEYS.SERVER_URL, newUrl);
-                    Spicetify.LocalStorage.set(STORAGE_KEYS.API_KEY, newApiKey);
-                    if (newInterval) Spicetify.LocalStorage.set(STORAGE_KEYS.RECONNECT_INTERVAL, newInterval);
+            const modalDialog = modalRoot.querySelector("div[role='dialog'], .GenericModal, [class*='modal-container']");
+            if (modalDialog) {
+                modalDialog.style.position = "relative";
+            }
 
-                    Spicetify.PopupModal.hide();
-                    Spicetify.showNotification("Settings saved! Reconnecting...");
+            const closeBtn = modalRoot.querySelector("button[aria-label*='Close'], button[aria-label*='Schließen'], button.main-trackCreditsModal-closeBtn");
+            if (closeBtn) {
+                closeBtn.style.position = "absolute";
+                closeBtn.style.top = "20px";
+                closeBtn.style.right = "20px";
+                closeBtn.style.background = "transparent";
+                closeBtn.style.border = "none";
+                closeBtn.style.color = "#b3b3b3";
+                closeBtn.style.cursor = "pointer";
+                closeBtn.style.width = "32px";
+                closeBtn.style.height = "32px";
+                closeBtn.style.display = "flex";
+                closeBtn.style.alignItems = "center";
+                closeBtn.style.justifyContent = "center";
+                closeBtn.style.borderRadius = "50%";
+                closeBtn.style.zIndex = "1000";
 
-                    if (reconnectTimer) clearTimeout(reconnectTimer);
-                    connect();
+                closeBtn.onmouseenter = () => {
+                    closeBtn.style.color = "#fff";
+                    closeBtn.style.background = "rgba(255, 255, 255, 0.1)";
+                };
+                closeBtn.onmouseleave = () => {
+                    closeBtn.style.color = "#b3b3b3";
+                    closeBtn.style.background = "transparent";
                 };
             }
-        }, 100);
+        }, 50);
     }
 
     function setupSettingsUI() {
@@ -591,9 +760,10 @@
     }
 
     // -------------------------------------------------------------------------
-    // 8. STARTUP
+    // 8. STARTUP & LIFECYCLE
     // -------------------------------------------------------------------------
 
+    window.addEventListener("beforeunload", teardown);
     setupEventListeners();
     setupSettingsUI();
     connect();

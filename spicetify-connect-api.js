@@ -1,6 +1,6 @@
 /**
- * spicetify-connect-api (v0.3.1)
- * Bridge between Spotify Desktop Client (Spicetify) and Python WebSocket Server.
+ * spicetify-connect-api (v0.3.2)
+ * Bridge between Spotify Desktop Client (Spicetify) and a WebSocket server (e.g. Python / Home Assistant).
  *
  * Installation:
  * 1. Save this file as 'spicetify-connect-api.js' in the Spicetify Extensions folder:
@@ -16,7 +16,7 @@
     // 1. CONFIGURATION & LOCAL STORAGE
     // -------------------------------------------------------------------------
 
-    const APP_VERSION = "0.3.1";
+    const APP_VERSION = "0.3.2";
 
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
@@ -27,6 +27,7 @@
     const DEFAULT_CONFIG = {
         SERVER_URL: "ws://127.0.0.1:9090",
         RECONNECT_INTERVAL: 3000,
+        RECONNECT_MAX_INTERVAL: 30000,
         API_KEY: "",
         VOLUME_DEBOUNCE_MS: 150,
         VOLUME_CHECK_INTERVAL: 200
@@ -51,6 +52,8 @@
     let volumeDebounceTimer = null;
     let pingTimer = null;
     let lastVolume = null;
+    let reconnectAttempts = 0;
+    let notifyOnNextConnect = true;
 
     // -------------------------------------------------------------------------
     // 2. SPICETIFY INITIALIZATION GUARD
@@ -74,6 +77,25 @@
     // -------------------------------------------------------------------------
     // 3. HELPER FUNCTIONS
     // -------------------------------------------------------------------------
+
+    function isWebSocketUrl(url) {
+        try {
+            const parsed = new URL(url);
+            return parsed.protocol === "ws:" || parsed.protocol === "wss:";
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function isSecureOrLocalWs(url) {
+        try {
+            const parsed = new URL(url);
+            const isLocal = ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
+            return parsed.protocol === "wss:" || isLocal;
+        } catch (e) {
+            return false;
+        }
+    }
 
     function toSpotifyUri(input) {
         if (!input || typeof input !== "string") return null;
@@ -170,7 +192,7 @@
         }
     }
 
-    function sendResponse(requestId, success, payload = {}, error = null) {
+    function sendResponse(requestId, success, payload = {}, error = null, includeToken = true) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             try {
                 const config = getConfig();
@@ -180,7 +202,7 @@
                     success: !!success,
                     payload: payload
                 };
-                if (config.API_KEY) {
+                if (config.API_KEY && includeToken) {
                     response.token = config.API_KEY;
                 }
                 if (error) response.error = error;
@@ -195,6 +217,18 @@
     // 4. WEBSOCKET CONNECTION HANDLING & CLEAN AUTO-RECONNECT
     // -------------------------------------------------------------------------
 
+    function detachSocket() {
+        if (!socket) return;
+        try {
+            socket.onopen = null;
+            socket.onmessage = null;
+            socket.onerror = null;
+            socket.onclose = null;
+            socket.close(1000, "Reconnecting");
+        } catch (e) {}
+        socket = null;
+    }
+
     function connect() {
         const currentConfig = getConfig();
 
@@ -202,16 +236,12 @@
             if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
                 return;
             }
-            try {
-                socket.onopen = null;
-                socket.onmessage = null;
-                socket.onerror = null;
-                socket.onclose = null;
-                socket.close();
-            } catch (e) {}
-            socket = null;
+            detachSocket();
         }
 
+        if (!isSecureOrLocalWs(currentConfig.SERVER_URL)) {
+            console.warn("[Spicetify-WS] Spotify blocks unencrypted ws:// connections to other devices. Use wss:// for remote servers.");
+        }
         console.info("[Spicetify-WS] Connecting to %s...", currentConfig.SERVER_URL);
 
         try {
@@ -219,8 +249,12 @@
 
             socket.onopen = () => {
                 console.log("[Spicetify-WS] WebSocket connection established!");
+                reconnectAttempts = 0;
                 startHeartbeat();
-                Spicetify.showNotification("Connect API: Server connected!");
+                if (notifyOnNextConnect) {
+                    Spicetify.showNotification("Connect API: Server connected!");
+                    notifyOnNextConnect = false;
+                }
                 sendEvent("InitialState", getFullPlayerState());
                 lastVolume = Spicetify.Player.getVolume();
             };
@@ -229,15 +263,24 @@
                 handleIncomingMessage(event.data);
             };
 
-            socket.onerror = () => {
-                console.warn("[Spicetify-WS] WebSocket connection attempt failed.");
-            };
-
-            socket.onclose = () => {
+            // Per spec an "error" is always followed by "close", but some runtimes only
+            // fire "error" for a failed handshake. React to whichever comes first, once.
+            const thisSocket = socket;
+            let closeHandled = false;
+            const handleClosed = () => {
+                if (closeHandled || socket !== thisSocket) return;
+                closeHandled = true;
                 stopHeartbeat();
-                console.info("[Spicetify-WS] Connection closed. Reconnecting in %dms...", currentConfig.RECONNECT_INTERVAL);
+                detachSocket();
                 scheduleReconnect();
             };
+
+            socket.onerror = () => {
+                console.warn("[Spicetify-WS] WebSocket connection attempt failed.");
+                handleClosed();
+            };
+
+            socket.onclose = handleClosed;
 
         } catch (err) {
             console.warn("[Spicetify-WS] Could not initiate WebSocket to %s:", currentConfig.SERVER_URL, err.message || err);
@@ -248,9 +291,29 @@
     function scheduleReconnect() {
         if (reconnectTimer) clearTimeout(reconnectTimer);
         const currentConfig = getConfig();
+        // Exponential backoff: base interval, doubled per failed attempt, capped.
+        const delay = Math.min(
+            currentConfig.RECONNECT_INTERVAL * Math.pow(2, reconnectAttempts),
+            Math.max(currentConfig.RECONNECT_INTERVAL, DEFAULT_CONFIG.RECONNECT_MAX_INTERVAL)
+        );
+        reconnectAttempts += 1;
+        console.info("[Spicetify-WS] Connection closed. Reconnecting in %dms...", delay);
         reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
             connect();
-        }, currentConfig.RECONNECT_INTERVAL);
+        }, delay);
+    }
+
+    function reconnectNow() {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        stopHeartbeat();
+        detachSocket();
+        reconnectAttempts = 0;
+        notifyOnNextConnect = true;
+        connect();
     }
 
     function startHeartbeat() {
@@ -272,23 +335,37 @@
     // 5. INCOMING COMMANDS
     // -------------------------------------------------------------------------
 
-    function handleIncomingMessage(rawData) {
+    async function seekTo(positionMs) {
+        // PlayerAPI.seekTo always takes milliseconds. Player.seek() treats values
+        // between 0 and 1 as a percentage, so it is only used as a fallback.
+        const playerApi = Spicetify.Platform && Spicetify.Platform.PlayerAPI;
+        if (playerApi && typeof playerApi.seekTo === "function") {
+            await playerApi.seekTo(positionMs);
+        } else {
+            Spicetify.Player.seek(positionMs <= 1 ? 0 : positionMs);
+        }
+    }
+
+    async function handleIncomingMessage(rawData) {
         let request;
         try {
             request = JSON.parse(rawData);
         } catch (err) {
-            console.warn("[Spicetify-WS] Invalid JSON received:", rawData);
+            console.warn("[Spicetify-WS] Invalid JSON received.");
             return;
         }
+        if (!request || typeof request !== "object" || Array.isArray(request)) return;
 
-        const { requestName, requestId, token, payload = {} } = request;
-        if (!requestName) return;
+        const { requestName, requestId, token } = request;
+        const payload = request.payload && typeof request.payload === "object" ? request.payload : {};
+        if (!requestName || typeof requestName !== "string") return;
 
         // Token authentication check if API_KEY is set
         const currentConfig = getConfig();
         if (currentConfig.API_KEY && token !== currentConfig.API_KEY) {
             console.warn("[Spicetify-WS] Unauthorized request attempt for '%s'. Token mismatch.", requestName);
-            sendResponse(requestId, false, {}, "Unauthorized: Invalid or missing API key.");
+            // Never send our own key to a server that does not know it.
+            sendResponse(requestId, false, {}, "Unauthorized: Invalid or missing API key.", false);
             return;
         }
 
@@ -328,14 +405,16 @@
                     }
                     sendResponse(requestId, true);
                     break;
-                case "SetVolume":
-                    if (typeof payload.level === "number" && payload.level >= 0 && payload.level <= 1) {
-                        Spicetify.Player.setVolume(payload.level);
-                        sendResponse(requestId, true, { level: payload.level });
+                case "SetVolume": {
+                    const level = payload.level;
+                    if (typeof level === "number" && Number.isFinite(level) && level >= 0 && level <= 1) {
+                        Spicetify.Player.setVolume(level);
+                        sendResponse(requestId, true, { level });
                     } else {
                         sendResponse(requestId, false, {}, "Parameter 'level' must be between 0.0 and 1.0.");
                     }
                     break;
+                }
                 case "SetRepeat":
                     if (typeof payload.mode === "number" && [0, 1, 2].includes(payload.mode)) {
                         Spicetify.Player.setRepeat(payload.mode);
@@ -376,7 +455,7 @@
                         sendResponse(requestId, false, {}, "Parameter 'status' must be a boolean.");
                     }
                     break;
-                case "ToggleHeart":
+                case "ToggleHeart": {
                     if (typeof Spicetify.Player.getHeart === "function" && typeof Spicetify.Player.setHeart === "function") {
                         const newHeartState = !Spicetify.Player.getHeart();
                         Spicetify.Player.setHeart(newHeartState);
@@ -385,24 +464,29 @@
                         sendResponse(requestId, false, {}, "Spicetify Heart API is not available.");
                     }
                     break;
-                case "PlayUri":
-                    const rawUri = payload.uri || payload.url;
-                    const formattedUri = toSpotifyUri(rawUri);
+                }
+                case "PlayUri": {
+                    const formattedUri = toSpotifyUri(payload.uri || payload.url);
                     if (formattedUri) {
-                        Spicetify.Player.playUri(formattedUri);
+                        // playUri returns a promise; report failures instead of a false success.
+                        await Spicetify.Player.playUri(formattedUri);
                         sendResponse(requestId, true, { uri: formattedUri });
                     } else {
                         sendResponse(requestId, false, {}, "Parameter 'uri' or 'url' is missing/invalid.");
                     }
                     break;
-                case "Seek":
-                    if (typeof payload.position === "number") {
-                        Spicetify.Player.seek(payload.position);
-                        sendResponse(requestId, true, { position: payload.position });
+                }
+                case "Seek": {
+                    const position = payload.position;
+                    if (typeof position === "number" && Number.isFinite(position) && position >= 0) {
+                        const targetMs = Math.round(position);
+                        await seekTo(targetMs);
+                        sendResponse(requestId, true, { position: targetMs });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'position' (ms) is missing.");
+                        sendResponse(requestId, false, {}, "Parameter 'position' must be a non-negative number (ms).");
                     }
                     break;
+                }
                 case "GetPlayerState":
                     sendResponse(requestId, true, getFullPlayerState());
                     break;
@@ -428,7 +512,7 @@
             }
         } catch (err) {
             console.warn("[Spicetify-WS] Error executing '%s':", requestName, err);
-            sendResponse(requestId, false, {}, err.message || "Internal error");
+            sendResponse(requestId, false, {}, (err && err.message) || "Internal error");
         }
     }
 
@@ -514,62 +598,116 @@
     // 7. UI SETTINGS INTEGRATION (PROFILE MENU)
     // -------------------------------------------------------------------------
 
+    function createField(labelText, input, helpText) {
+        const group = document.createElement("div");
+
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        label.style.display = "block";
+        label.style.marginBottom = "5px";
+        label.style.fontWeight = "bold";
+
+        input.style.width = "100%";
+        input.style.padding = "8px";
+        input.style.borderRadius = "4px";
+        input.style.border = "1px solid #444";
+        input.style.background = "#222";
+        input.style.color = "#fff";
+
+        group.appendChild(label);
+        group.appendChild(input);
+
+        if (helpText) {
+            const help = document.createElement("small");
+            help.style.color = "#aaa";
+            help.textContent = helpText;
+            group.appendChild(help);
+        }
+        return group;
+    }
+
+    function createInput(type, value, placeholder) {
+        const input = document.createElement("input");
+        input.type = type;
+        // Values are assigned as properties, never interpolated into HTML.
+        input.value = value;
+        if (placeholder) input.placeholder = placeholder;
+        return input;
+    }
+
     function openSettingsModal() {
         const currentConfig = getConfig();
 
         const content = document.createElement("div");
         content.style.display = "flex";
         content.style.flexDirection = "column";
-        content.style.gap = "5px";
+        content.style.gap = "8px";
         content.style.padding = "10px";
 
-        content.innerHTML = `
-            <div>
-                <label style="display:block; margin-bottom:5px; font-weight:bold;">WebSocket Server URL</label>
-                <input type="text" id="ws-server-url" value="${currentConfig.SERVER_URL}" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-                <small style="color:#aaa;">Use <code>ws://127.0.0.1:9090</code> for local, <code>wss://IP:PORT:9090</code> for encrypted connections or <code>wss://DOMAIN:PORT</code> for remote connections.</small>
-            </div>
-            <div>
-                <label style="display:block; margin-bottom:5px; font-weight:bold;">API Key / Secret Token (Optional)</label>
-                <input type="password" id="ws-api-key" value="${currentConfig.API_KEY}" placeholder="Leave empty if authentication is disabled" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-                <small style="color:#aaa;">Optional security token sent with outbound events and required for incoming commands.</small>
-            </div>
-            <div>
-                <label style="display:block; margin-bottom:5px; font-weight:bold;">Reconnect Interval (ms)</label>
-                <input type="number" id="ws-reconnect-interval" value="${currentConfig.RECONNECT_INTERVAL}" style="width:100%; padding:8px; border-radius:4px; border:1px solid #444; background:#222; color:#fff;" />
-            </div>
-            <button id="ws-save-btn" style="padding:10px; border-radius:20px; border:none; background:#1db954; color:#000; font-weight:bold; cursor:pointer; margin-top:10px;">Save & Reconnect</button>
-            
-            <div style="text-align:right; font-size:11px; color:#666; margin-top:5px;">
-                Installed Version: v${APP_VERSION}
-            </div>
-        `;
+        const urlInput = createInput("text", currentConfig.SERVER_URL);
+        const keyInput = createInput("password", currentConfig.API_KEY, "Leave empty if authentication is disabled");
+        const intervalInput = createInput("number", String(currentConfig.RECONNECT_INTERVAL));
+        intervalInput.min = "1000";
+
+        content.appendChild(createField(
+            "WebSocket Server URL",
+            urlInput,
+            "Use ws://127.0.0.1:9090 if the server runs on this PC, or wss://SERVER_IP:9090 (or wss://your-domain) for a server on another device."
+        ));
+        content.appendChild(createField(
+            "API Key / Secret Token (Optional)",
+            keyInput,
+            "Must match the API key of the server. Sent with every message and required for incoming commands."
+        ));
+        content.appendChild(createField(
+            "Reconnect Interval (ms)",
+            intervalInput,
+            "Initial delay before reconnecting (minimum 1000). Doubles after each failed attempt, up to 30 seconds."
+        ));
+
+        const saveBtn = document.createElement("button");
+        saveBtn.textContent = "Save & Reconnect";
+        saveBtn.style.padding = "10px";
+        saveBtn.style.borderRadius = "20px";
+        saveBtn.style.border = "none";
+        saveBtn.style.background = "#1db954";
+        saveBtn.style.color = "#000";
+        saveBtn.style.fontWeight = "bold";
+        saveBtn.style.cursor = "pointer";
+        saveBtn.style.marginTop = "10px";
+        saveBtn.onclick = () => {
+            const newUrl = urlInput.value.trim();
+            const newApiKey = keyInput.value.trim();
+            const newInterval = intervalInput.value.trim();
+
+            if (newUrl && !isWebSocketUrl(newUrl)) {
+                Spicetify.showNotification("Invalid server URL. It must start with ws:// or wss://", true);
+                return;
+            }
+
+            if (newUrl) Spicetify.LocalStorage.set(STORAGE_KEYS.SERVER_URL, newUrl);
+            Spicetify.LocalStorage.set(STORAGE_KEYS.API_KEY, newApiKey);
+            if (newInterval) Spicetify.LocalStorage.set(STORAGE_KEYS.RECONNECT_INTERVAL, newInterval);
+
+            Spicetify.PopupModal.hide();
+            Spicetify.showNotification("Settings saved! Reconnecting...");
+            // Close the current connection so a changed URL takes effect immediately.
+            reconnectNow();
+        };
+        content.appendChild(saveBtn);
+
+        const version = document.createElement("div");
+        version.style.textAlign = "right";
+        version.style.fontSize = "11px";
+        version.style.color = "#666";
+        version.style.marginTop = "5px";
+        version.textContent = `Installed Version: v${APP_VERSION}`;
+        content.appendChild(version);
 
         Spicetify.PopupModal.display({
             title: "Connect API Settings",
             content: content
         });
-
-        setTimeout(() => {
-            const saveBtn = document.getElementById("ws-save-btn");
-            if (saveBtn) {
-                saveBtn.onclick = () => {
-                    const newUrl = document.getElementById("ws-server-url").value.trim();
-                    const newApiKey = document.getElementById("ws-api-key").value.trim();
-                    const newInterval = document.getElementById("ws-reconnect-interval").value.trim();
-
-                    if (newUrl) Spicetify.LocalStorage.set(STORAGE_KEYS.SERVER_URL, newUrl);
-                    Spicetify.LocalStorage.set(STORAGE_KEYS.API_KEY, newApiKey);
-                    if (newInterval) Spicetify.LocalStorage.set(STORAGE_KEYS.RECONNECT_INTERVAL, newInterval);
-
-                    Spicetify.PopupModal.hide();
-                    Spicetify.showNotification("Settings saved! Reconnecting...");
-
-                    if (reconnectTimer) clearTimeout(reconnectTimer);
-                    connect();
-                };
-            }
-        }, 100);
     }
 
     function setupSettingsUI() {

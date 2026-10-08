@@ -30,7 +30,11 @@
         RECONNECT_MAX_INTERVAL: 30000,
         API_KEY: "",
         VOLUME_DEBOUNCE_MS: 150,
-        VOLUME_CHECK_INTERVAL: 200
+        VOLUME_CHECK_INTERVAL: 200,
+        HEARTBEAT_INTERVAL: 30000,
+        // Upcoming/previous tracks sent with each event. The full queue (50 tracks)
+        // made every event about 128 KB.
+        MAX_QUEUE_ITEMS: 5
     };
 
     function getConfig() {
@@ -50,7 +54,6 @@
     let socket = null;
     let reconnectTimer = null;
     let volumeDebounceTimer = null;
-    let pingTimer = null;
     let lastVolume = null;
     let reconnectAttempts = 0;
     let notifyOnNextConnect = true;
@@ -145,32 +148,27 @@
     }
 
     function getFullPlayerState() {
-        let patchedPlayerData = null;
+        let playerData = null;
         const currentProgress = Spicetify.Player.getProgress();
-        const currentVolume = Spicetify.Player.getVolume();
-        const currentMute = typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false;
-        const currentHeart = typeof Spicetify.Player.getHeart === "function" ? Spicetify.Player.getHeart() : false;
+        const data = Spicetify.Player.data;
 
-        if (Spicetify.Player.data) {
-            patchedPlayerData = {
-                ...Spicetify.Player.data,
-                position_as_of_timestamp: currentProgress,
+        if (data) {
+            const maxItems = DEFAULT_CONFIG.MAX_QUEUE_ITEMS;
+            playerData = {
+                ...data,
                 positionAsOfTimestamp: currentProgress,
-                volume: currentVolume,
-                is_muted: currentMute,
-                isMuted: currentMute,
-                is_hearted: currentHeart,
-                isHearted: currentHeart,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                nextItems: Array.isArray(data.nextItems) ? data.nextItems.slice(0, maxItems) : [],
+                previousItems: Array.isArray(data.previousItems) ? data.previousItems.slice(-maxItems) : []
             };
         }
 
         return {
-            playerData: patchedPlayerData,
+            playerData,
             isPlaying: Spicetify.Player.isPlaying(),
-            volume: currentVolume,
-            isMuted: currentMute,
-            isHearted: currentHeart,
+            volume: Spicetify.Player.getVolume(),
+            isMuted: typeof Spicetify.Player.getMute === "function" ? Spicetify.Player.getMute() : false,
+            isHearted: typeof Spicetify.Player.getHeart === "function" ? Spicetify.Player.getHeart() : false,
             shuffle: Spicetify.Player.getShuffle(),
             repeat: Spicetify.Player.getRepeat(),
             progress: currentProgress
@@ -255,12 +253,13 @@
                     Spicetify.showNotification("Connect API: Server connected!");
                     notifyOnNextConnect = false;
                 }
-                sendEvent("InitialState", getFullPlayerState());
-                lastVolume = Spicetify.Player.getVolume();
+                sendStateEvent("InitialState");
             };
 
             socket.onmessage = (event) => {
-                handleIncomingMessage(event.data);
+                // Incoming messages are not throttled in the background, so they
+                // also serve as a chance to detect polled state changes.
+                handleIncomingMessage(event.data).finally(pollPlayerState);
             };
 
             // Per spec an "error" is always followed by "close", but some runtimes only
@@ -316,18 +315,20 @@
         connect();
     }
 
+    let lastPingAt = 0;
+
     function startHeartbeat() {
-        stopHeartbeat();
-        pingTimer = setInterval(() => {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            sendEvent("Ping", { timestamp: Date.now() });
-        }, 30000);
+        lastPingAt = Date.now();
     }
 
     function stopHeartbeat() {
-        if (pingTimer) {
-            clearInterval(pingTimer);
-            pingTimer = null;
+        lastPingAt = 0;
+    }
+
+    function sendHeartbeatIfDue(now) {
+        if (lastPingAt && now - lastPingAt >= DEFAULT_CONFIG.HEARTBEAT_INTERVAL) {
+            lastPingAt = now;
+            sendEvent("Ping", { timestamp: now });
         }
     }
 
@@ -517,7 +518,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // 6. EVENT LISTENERS (v0.3.0 Full State Architecture)
+    // 6. EVENT LISTENERS (Full State Architecture)
     // -------------------------------------------------------------------------
 
     let lastRepeat = null;
@@ -525,18 +526,105 @@
     let lastHeart = null;
     let lastProgress = 0;
     let lastProgressTime = Date.now();
+    let lastPollAt = 0;
+
+    function readHeart() {
+        return typeof Spicetify.Player.getHeart === "function" ? Spicetify.Player.getHeart() : null;
+    }
+
+    // Every event carries the full state, so after sending one, the polled
+    // values are up to date. This avoids extra RepeatChanged/HeartChanged/...
+    // events right after a song change.
+    function syncPolledBaselines() {
+        lastVolume = Spicetify.Player.getVolume();
+        lastRepeat = Spicetify.Player.getRepeat();
+        lastShuffle = Spicetify.Player.getShuffle();
+        lastHeart = readHeart();
+        if (volumeDebounceTimer) {
+            clearTimeout(volumeDebounceTimer);
+            volumeDebounceTimer = null;
+        }
+    }
+
+    function sendStateEvent(eventName) {
+        sendEvent(eventName, getFullPlayerState());
+        syncPolledBaselines();
+    }
+
+    function pollPlayerState() {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const now = Date.now();
+        // Several tick sources may fire; the checks are idempotent, so just rate-limit.
+        if (now - lastPollAt < DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL / 2) return;
+        lastPollAt = now;
+
+        sendHeartbeatIfDue(now);
+
+        const currentVolume = Spicetify.Player.getVolume();
+        if (lastVolume !== null && Math.abs(currentVolume - lastVolume) > 0.001) {
+            lastVolume = currentVolume;
+            if (volumeDebounceTimer) clearTimeout(volumeDebounceTimer);
+            volumeDebounceTimer = setTimeout(() => {
+                volumeDebounceTimer = null;
+                sendStateEvent("VolumeChanged");
+            }, DEFAULT_CONFIG.VOLUME_DEBOUNCE_MS);
+        } else if (lastVolume === null) {
+            lastVolume = currentVolume;
+        }
+
+        const currentRepeat = Spicetify.Player.getRepeat();
+        if (lastRepeat !== null && currentRepeat !== lastRepeat) {
+            sendStateEvent("RepeatChanged");
+        } else if (lastRepeat === null) {
+            lastRepeat = currentRepeat;
+        }
+
+        const currentShuffle = Spicetify.Player.getShuffle();
+        if (lastShuffle !== null && currentShuffle !== lastShuffle) {
+            sendStateEvent("ShuffleChanged");
+        } else if (lastShuffle === null) {
+            lastShuffle = currentShuffle;
+        }
+
+        const currentHeart = readHeart();
+        if (currentHeart !== null) {
+            if (lastHeart !== null && currentHeart !== lastHeart) {
+                sendStateEvent("HeartChanged");
+            } else if (lastHeart === null) {
+                lastHeart = currentHeart;
+            }
+        }
+    }
+
+    // Chromium throttles timers in pages hidden for more than 5 minutes to one
+    // wake-up per minute, which delayed volume/repeat/shuffle/like updates (and
+    // the heartbeat) while Spotify was minimized. A timer inside a dedicated
+    // worker is added as a second tick source; the main-thread interval stays as
+    // a fallback in case workers are unavailable or throttled as well.
+    function startPolling() {
+        setInterval(pollPlayerState, DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL);
+        try {
+            const source = `setInterval(() => postMessage(0), ${DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL});`;
+            const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+            const worker = new Worker(url);
+            URL.revokeObjectURL(url);
+            worker.onmessage = pollPlayerState;
+        } catch (err) {
+            console.info("[Spicetify-WS] Worker ticker unavailable, using the main-thread timer only.");
+        }
+    }
 
     function setupEventListeners() {
         Spicetify.Player.addEventListener("songchange", () => {
             lastProgress = 0;
             lastProgressTime = Date.now();
-            sendEvent("SongChanged", getFullPlayerState());
+            sendStateEvent("SongChanged");
         });
 
         Spicetify.Player.addEventListener("onplaypause", () => {
             lastProgress = Spicetify.Player.getProgress();
             lastProgressTime = Date.now();
-            sendEvent("PlayPauseChanged", getFullPlayerState());
+            sendStateEvent("PlayPauseChanged");
         });
 
         Spicetify.Player.addEventListener("onprogress", (event) => {
@@ -546,52 +634,14 @@
             const expectedProgress = Spicetify.Player.isPlaying() ? lastProgress + timePassed : lastProgress;
 
             if (Math.abs(currentProgress - expectedProgress) > 1500) {
-                sendEvent("SeekChanged", getFullPlayerState());
+                sendStateEvent("SeekChanged");
             }
 
             lastProgress = currentProgress;
             lastProgressTime = now;
         });
 
-        setInterval(() => {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            const currentConfig = getConfig();
-
-            const currentVolume = Spicetify.Player.getVolume();
-            if (lastVolume !== null && Math.abs(currentVolume - lastVolume) > 0.001) {
-                lastVolume = currentVolume;
-                if (volumeDebounceTimer) clearTimeout(volumeDebounceTimer);
-                volumeDebounceTimer = setTimeout(() => {
-                    sendEvent("VolumeChanged", getFullPlayerState());
-                }, currentConfig.VOLUME_DEBOUNCE_MS);
-            }
-
-            const currentRepeat = Spicetify.Player.getRepeat();
-            if (lastRepeat !== null && currentRepeat !== lastRepeat) {
-                lastRepeat = currentRepeat;
-                sendEvent("RepeatChanged", getFullPlayerState());
-            } else if (lastRepeat === null) {
-                lastRepeat = currentRepeat;
-            }
-
-            const currentShuffle = Spicetify.Player.getShuffle();
-            if (lastShuffle !== null && currentShuffle !== lastShuffle) {
-                lastShuffle = currentShuffle;
-                sendEvent("ShuffleChanged", getFullPlayerState());
-            } else if (lastShuffle === null) {
-                lastShuffle = currentShuffle;
-            }
-
-            if (typeof Spicetify.Player.getHeart === "function") {
-                const currentHeart = Spicetify.Player.getHeart();
-                if (lastHeart !== null && currentHeart !== lastHeart) {
-                    lastHeart = currentHeart;
-                    sendEvent("HeartChanged", getFullPlayerState());
-                } else if (lastHeart === null) {
-                    lastHeart = currentHeart;
-                }
-            }
-        }, DEFAULT_CONFIG.VOLUME_CHECK_INTERVAL);
+        startPolling();
     }
 
     // -------------------------------------------------------------------------

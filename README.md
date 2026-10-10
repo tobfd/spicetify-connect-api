@@ -25,6 +25,7 @@ A lightweight, feature-rich JavaScript extension for Spicetify that acts as a re
     - `ShuffleChanged`: Triggered when shuffle mode is toggled.
     - `SeekChanged`: Triggered when manually seeking or scrubbing through a track.
     - `HeartChanged`: Triggered when a track is saved to or removed from Liked Songs.
+    - `BufferingChanged`: Triggered when Spotify finishes buffering (for example shortly after a song change or seek).
     - `Ping`: Triggered periodically every 30 seconds as a heartbeat.
 - **Full Control Commands**: Supports incoming JSON requests to control playback, volume, shuffle, repeat, seeking, track liking, and status queries.
 
@@ -115,7 +116,7 @@ Send JSON messages in the following structure (include `"token"` if API Key is s
 | `SetVolume`                       | `level` (float `0.0` - `1.0`)         | Sets the volume level.                                                                                               |
 | `SetRepeat`                       | `mode` (`0`: Off, `1`: All, `2`: One) | Sets repeat mode.                                                                                                    |
 | `SetShuffle`                      | `state` (boolean)                     | Enables/disables shuffle.                                                                                            |
-| `SetMute`                         | `state` (boolean)                     | Mutes/unmutes audio.                                                                                                 |
+| `SetMute`                         | `state` (boolean)                     | Mutes (volume 0) or unmutes (restores the previous volume).                                                          |
 | `SetHeart`                        | `status` (boolean)                    | Likes (`true`) or unlikes (`false`) the current track.                                                               |
 | `ToggleHeart`                     | *None*                                | Toggles the like/heart status of the current track.                                                                  |
 | `PlayUri`                         | `uri` or `url` (string)               | Plays an item via URI (`spotify:track:...`) or web URL (`https://open.spotify.com/track/...`). Fails if Spotify rejects it. |
@@ -133,7 +134,7 @@ Send JSON messages in the following structure (include `"token"` if API Key is s
 #### Event Push Notification
 All player events (except `Ping`) emit the **complete player state** in their payload.
 
-Emitted event types include: `InitialState`, `SongChanged`, `PlayPauseChanged`, `VolumeChanged`, `RepeatChanged`, `ShuffleChanged`, `SeekChanged`, `HeartChanged`, `Ping`.
+Emitted event types include: `InitialState`, `SongChanged`, `PlayPauseChanged`, `VolumeChanged`, `RepeatChanged`, `ShuffleChanged`, `SeekChanged`, `HeartChanged`, `BufferingChanged`, `Ping`.
 
 ```json
 {

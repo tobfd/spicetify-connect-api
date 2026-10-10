@@ -108,7 +108,8 @@ function loadExtension({ playerData = null, settings = {} } = {}) {
             setMute: record("setMute"),
             setHeart: (value) => { player.heart = value; calls.push({ name: "setHeart", args: [value] }); },
             getHeart: () => player.heart,
-            getMute: () => false,
+            // Spicetify defines "muted" as volume 0.
+            getMute: () => player.volume === 0,
             getProgress: () => player.progress,
             getVolume: () => player.volume,
             isPlaying: () => true,

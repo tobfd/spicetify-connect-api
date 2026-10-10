@@ -93,6 +93,33 @@ test("seeks in milliseconds via PlayerAPI.seekTo", async () => {
     assert.deepEqual(ext.callsOf("seek"), []);
 });
 
+test("SetMute sets the volume to 0 and restores it on unmute", async () => {
+    const socket = connected();
+
+    await socket.receive({ requestName: "SetMute", requestId: "1", token: "secret", payload: { state: true } });
+    assert.equal(ext.player.volume, 0);
+    assert.equal(lastResponse(socket).success, true);
+
+    await socket.receive({ requestName: "SetMute", requestId: "2", token: "secret", payload: { state: false } });
+    assert.equal(ext.player.volume, 0.42);
+    // Player.setMute() only clicks a UI button that may not exist.
+    assert.deepEqual(ext.callsOf("setMute"), []);
+});
+
+test("SetMute unmutes to a default volume if nothing was remembered", async () => {
+    const socket = connected();
+    ext.player.volume = 0;
+
+    await socket.receive({ requestName: "SetMute", requestId: "1", token: "secret", payload: { state: false } });
+    assert.equal(ext.player.volume, 0.5);
+
+    // Muting twice must not overwrite the remembered volume with 0.
+    await socket.receive({ requestName: "SetMute", requestId: "2", token: "secret", payload: { state: true } });
+    await socket.receive({ requestName: "SetMute", requestId: "3", token: "secret", payload: { state: true } });
+    await socket.receive({ requestName: "SetMute", requestId: "4", token: "secret", payload: { state: false } });
+    assert.equal(ext.player.volume, 0.5);
+});
+
 test("PlayUri converts web URLs and reports playback failures", async () => {
     const socket = connected();
 
@@ -193,4 +220,17 @@ test("reconnects with exponential backoff after the connection drops", async () 
     assert.equal(ext.sockets.length, 2, "second retry waits 2 s");
     await new Promise((resolve) => setTimeout(resolve, 1000));
     assert.equal(ext.sockets.length, 3);
+});
+
+test("the end of buffering is reported once", async () => {
+    const playerData = { ...PLAYER_DATA, isBuffering: true };
+    const socket = connected({ playerData });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    socket.sent.length = 0;
+
+    playerData.isBuffering = false;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    assert.deepEqual(socket.sent.map((m) => m.eventName), ["BufferingChanged"]);
+    assert.equal(socket.sent[0].payload.playerData.isBuffering, false);
 });

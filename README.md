@@ -25,6 +25,7 @@ A lightweight, feature-rich JavaScript extension for Spicetify that acts as a re
     - `ShuffleChanged`: Triggered when shuffle mode is toggled.
     - `SeekChanged`: Triggered when manually seeking or scrubbing through a track.
     - `HeartChanged`: Triggered when a track is saved to or removed from Liked Songs.
+    - `BufferingChanged`: Triggered when Spotify finishes buffering (for example shortly after a song change or seek).
     - `Ping`: Triggered periodically every 30 seconds as a heartbeat.
 - **Full Control Commands**: Supports incoming JSON requests to control playback, volume, shuffle, repeat, seeking, track liking, and status queries.
 
@@ -133,7 +134,7 @@ Send JSON messages in the following structure (include `"token"` if API Key is s
 #### Event Push Notification
 All player events (except `Ping`) emit the **complete player state** in their payload.
 
-Emitted event types include: `InitialState`, `SongChanged`, `PlayPauseChanged`, `VolumeChanged`, `RepeatChanged`, `ShuffleChanged`, `SeekChanged`, `HeartChanged`, `Ping`.
+Emitted event types include: `InitialState`, `SongChanged`, `PlayPauseChanged`, `VolumeChanged`, `RepeatChanged`, `ShuffleChanged`, `SeekChanged`, `HeartChanged`, `BufferingChanged`, `Ping`.
 
 ```json
 {

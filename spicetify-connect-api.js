@@ -540,12 +540,18 @@
     let lastRepeat = null;
     let lastShuffle = null;
     let lastHeart = null;
+    let lastBuffering = null;
     let lastProgress = 0;
     let lastProgressTime = Date.now();
     let lastPollAt = 0;
 
     function readHeart() {
         return typeof Spicetify.Player.getHeart === "function" ? Spicetify.Player.getHeart() : null;
+    }
+
+    function readBuffering() {
+        const data = Spicetify.Player.data;
+        return data ? data.isBuffering === true : null;
     }
 
     // Every event carries the full state, so after sending one, the polled
@@ -556,6 +562,7 @@
         lastRepeat = Spicetify.Player.getRepeat();
         lastShuffle = Spicetify.Player.getShuffle();
         lastHeart = readHeart();
+        lastBuffering = readBuffering();
         if (volumeDebounceTimer) {
             clearTimeout(volumeDebounceTimer);
             volumeDebounceTimer = null;
@@ -608,6 +615,18 @@
                 sendStateEvent("HeartChanged");
             } else if (lastHeart === null) {
                 lastHeart = currentHeart;
+            }
+        }
+
+        // Song changes and seeks are reported while Spotify is still buffering.
+        // Report the end of buffering so the receiver gets the playing state and
+        // an exact position. The start needs no event of its own.
+        const currentBuffering = readBuffering();
+        if (currentBuffering !== null) {
+            if (lastBuffering === true && currentBuffering === false) {
+                sendStateEvent("BufferingChanged");
+            } else {
+                lastBuffering = currentBuffering;
             }
         }
     }

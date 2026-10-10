@@ -10,7 +10,7 @@ I am always happy to receive contributions to **spicetify-connect-api**! Here is
 2. **Clone** your fork locally and create a new branch for your changes (e.g., `feature/my-feature` or `fix/my-fix`).
 3. **Make your changes** in `spicetify-connect-api.js`. Please format your commit messages according to the [Conventional Commits](https://www.conventionalcommits.org/) specification.
 4. **Test your changes** locally in Spotify (see instructions below).
-5. **Create a Pull Request** against the `main` branch.
+5. **Create a Pull Request** against the `master` branch.
 
 ---
 
@@ -27,6 +27,22 @@ To test your changes directly inside the Spotify Desktop client:
    spicetify apply
    ```
 3. Open Spotify and inspect the Developer Console to check for logs, errors, or WebSocket connection events. Enable devtools with ``spicetify enable-devtools`` and right click in Spotify and select ``Show DevTools`` and click on the ``Console`` tab.
+
+---
+
+## ✅ Automated Checks
+
+The extension can be tested without Spotify: `test/helpers.js` loads `spicetify-connect-api.js` with a fake `Spicetify` API and a fake WebSocket. Requires Node.js 22+.
+
+```bash
+npm ci
+npm run lint
+npm test
+```
+
+CI runs the same checks on every pull request.
+
+> **Note:** The Spicetify Marketplace installs the extension straight from the default branch. Every merge to `master` reaches users without a separate release step, so test changes locally first.
 
 ---
 

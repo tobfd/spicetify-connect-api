@@ -24,6 +24,9 @@
         API_KEY: "spicetify-connect-api:api_key"
     };
 
+    // Volume used when unmuting without a remembered volume (e.g. muted in Spotify).
+    const DEFAULT_UNMUTE_VOLUME = 0.5;
+
     const DEFAULT_CONFIG = {
         SERVER_URL: "ws://127.0.0.1:9090",
         RECONNECT_INTERVAL: 3000,
@@ -55,6 +58,7 @@
     let reconnectTimer = null;
     let volumeDebounceTimer = null;
     let lastVolume = null;
+    let volumeBeforeMute = null;
     let reconnectAttempts = 0;
     let notifyOnNextConnect = true;
 
@@ -336,6 +340,22 @@
     // 5. INCOMING COMMANDS
     // -------------------------------------------------------------------------
 
+    function setMuted(muted) {
+        // Spicetify defines "muted" as volume 0, but Player.setMute() only clicks
+        // the mute button in the UI and silently does nothing if that button is
+        // not found. Set the volume directly and remember it for unmuting.
+        const current = Spicetify.Player.getVolume();
+        if (muted) {
+            if (current > 0) {
+                volumeBeforeMute = current;
+                Spicetify.Player.setVolume(0);
+            }
+        } else if (current === 0) {
+            Spicetify.Player.setVolume(volumeBeforeMute || DEFAULT_UNMUTE_VOLUME);
+            volumeBeforeMute = null;
+        }
+    }
+
     async function seekTo(positionMs) {
         // PlayerAPI.seekTo always takes milliseconds. Player.seek() treats values
         // between 0 and 1 as a percentage, so it is only used as a fallback.
@@ -434,11 +454,7 @@
                     break;
                 case "SetMute":
                     if (typeof payload.state === "boolean") {
-                        if (typeof Spicetify.Player.setMute === "function") {
-                            Spicetify.Player.setMute(payload.state);
-                        } else {
-                            Spicetify.Player.setVolume(payload.state ? 0 : (lastVolume || 0.5));
-                        }
+                        setMuted(payload.state);
                         sendResponse(requestId, true, { isMuted: payload.state });
                     } else {
                         sendResponse(requestId, false, {}, "Parameter 'state' must be a boolean.");

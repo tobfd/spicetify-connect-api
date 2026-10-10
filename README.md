@@ -15,7 +15,7 @@ A lightweight, feature-rich JavaScript extension for Spicetify that acts as a re
 - **Native Settings UI**: Access configuration settings directly inside Spotify by clicking your **Profile Picture**.
 - **API Key Authentication**: Optional security token support to protect incoming commands and authenticate outgoing push events.
 - **WSS / Secure Connections**: Full support for encrypted `wss://` connections for remote setups or local SSL environments.
-- **Automatic Reconnection**: Safely attempts auto-reconnecting if the server drops or restarts.
+- **Automatic Reconnection**: Reconnects automatically with exponential backoff (doubling up to 30 seconds) if the server drops or restarts.
 - **Real-Time Push Events**: Emits instant WebSocket events on player state changes:
     - `InitialState`: Dispatched immediately upon WebSocket connection.
     - `SongChanged`: Triggered on track changes.
@@ -37,9 +37,11 @@ You can configure the extension directly within Spotify:
 1. Click on your **Profile Picture** in the top-right corner of Spotify.
 2. Click **Connect API Settings**.
 3. Adjust your settings in the popup modal:
-    - **WebSocket Server URL**: Default is `ws://127.0.0.1:9090`. Use `wss://IP:PORT:9090` for encrypted connections or `wss://DOMAIN:PORT` for remote connections.
+    - **WebSocket Server URL**: Default is `ws://127.0.0.1:9090` (server on the same PC). Use `wss://SERVER_IP:9090` or `wss://your-domain` for a server on another device; Spotify blocks unencrypted `ws://` connections to other devices.
     - **API Key / Secret Token (Optional)**: Set a custom secret token matching your server configuration for authenticated setups.
-    - **Reconnect Interval (ms)**: Set how fast the extension attempts to reconnect on disconnect (Minimum `1000ms`).
+    - **Reconnect Interval (ms)**: Initial delay before reconnecting (minimum `1000ms`). It doubles after each failed attempt, up to 30 seconds.
+
+    **Save & Reconnect** applies the settings immediately and reconnects to the (new) server.
 
 ---
 
@@ -113,11 +115,11 @@ Send JSON messages in the following structure (include `"token"` if API Key is s
 | `SetVolume`                       | `level` (float `0.0` - `1.0`)         | Sets the volume level.                                                                                               |
 | `SetRepeat`                       | `mode` (`0`: Off, `1`: All, `2`: One) | Sets repeat mode.                                                                                                    |
 | `SetShuffle`                      | `state` (boolean)                     | Enables/disables shuffle.                                                                                            |
-| `SetMute`                         | `state` (boolean)                     | Mutes/unmutes audio.                                                                                                 |
+| `SetMute`                         | `state` (boolean)                     | Mutes (volume 0) or unmutes (restores the previous volume).                                                          |
 | `SetHeart`                        | `status` (boolean)                    | Likes (`true`) or unlikes (`false`) the current track.                                                               |
 | `ToggleHeart`                     | *None*                                | Toggles the like/heart status of the current track.                                                                  |
-| `PlayUri`                         | `uri` or `url` (string)               | Plays an item via URI (`spotify:track:...`) or web URL (`https://open.spotify.com/track/...`).                       |
-| `Seek`                            | `position` (number in ms)             | Seeks to a specific track position in milliseconds.                                                                  |
+| `PlayUri`                         | `uri` or `url` (string)               | Plays an item via URI (`spotify:track:...`) or web URL (`https://open.spotify.com/track/...`). Fails if Spotify rejects it. |
+| `Seek`                            | `position` (number in ms, `>= 0`)     | Seeks to a specific track position in milliseconds.                                                                  |
 | `GetPlayerState`                  | *None*                                | Returns full player state snapshot (with patched live `position_as_of_timestamp`, `volume`, `isMuted`, `isHearted`). |
 | `GetCurrentTrack`                 | *None*                                | Returns active track object.                                                                                         |
 | `GetVolume`                       | *None*                                | Returns current volume level.                                                                                        |

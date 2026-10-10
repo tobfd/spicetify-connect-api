@@ -115,7 +115,7 @@ Send JSON messages in the following structure (include `"token"` if API Key is s
 | `SetVolume`                       | `level` (float `0.0` - `1.0`)         | Sets the volume level.                                                                                               |
 | `SetRepeat`                       | `mode` (`0`: Off, `1`: All, `2`: One) | Sets repeat mode.                                                                                                    |
 | `SetShuffle`                      | `state` (boolean)                     | Enables/disables shuffle.                                                                                            |
-| `SetMute`                         | `state` (boolean)                     | Mutes/unmutes audio.                                                                                                 |
+| `SetMute`                         | `state` (boolean)                     | Mutes (volume 0) or unmutes (restores the previous volume).                                                          |
 | `SetHeart`                        | `status` (boolean)                    | Likes (`true`) or unlikes (`false`) the current track.                                                               |
 | `ToggleHeart`                     | *None*                                | Toggles the like/heart status of the current track.                                                                  |
 | `PlayUri`                         | `uri` or `url` (string)               | Plays an item via URI (`spotify:track:...`) or web URL (`https://open.spotify.com/track/...`). Fails if Spotify rejects it. |

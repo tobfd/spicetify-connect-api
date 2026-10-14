@@ -6,7 +6,10 @@ const { loadExtension, FakeWebSocket } = require("./helpers");
 
 let ext;
 
-afterEach(() => ext?.dispose());
+afterEach(() => {
+    ext?.dispose();
+    assert.deepEqual(ext?.schemaErrors ?? [], [], "sent messages must match protocol/messages.schema.json");
+});
 
 function connected(options) {
     ext = loadExtension(options);
@@ -33,7 +36,26 @@ test("connects to the configured URL and authenticates with InitialState", () =>
     const [first] = socket.sent;
     assert.equal(first.eventName, "InitialState");
     assert.equal(first.token, "secret");
+    assert.equal(first.payload.protocolVersion, 1);
+    assert.equal(first.payload.extensionVersion, "0.4.0");
     assert.equal(ext.notifications.length, 1);
+});
+
+test("failed requests carry a machine-readable error code", async () => {
+    const socket = connected();
+
+    await socket.receive({ requestName: "SetVolume", requestId: "1", token: "secret", payload: { level: 2 } });
+    assert.equal(lastResponse(socket).code, "invalid_params");
+
+    await socket.receive({ requestName: "Teleport", requestId: "2", token: "secret" });
+    assert.equal(lastResponse(socket).code, "unknown_request");
+
+    await socket.receive({ requestName: "Play", requestId: "3", token: "wrong" });
+    assert.equal(lastResponse(socket).code, "unauthorized");
+
+    ext.player.playUriError = "Track unavailable";
+    await socket.receive({ requestName: "PlayUri", requestId: "4", token: "secret", payload: { uri: "spotify:track:x" } });
+    assert.equal(lastResponse(socket).code, "command_failed");
 });
 
 test("executes authorized commands", async () => {

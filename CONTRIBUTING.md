@@ -40,7 +40,15 @@ npm run lint
 npm test
 ```
 
-CI runs the same checks on every pull request.
+Every message the extension sends in these tests is validated against `protocol/messages.schema.json`. CI runs the same checks on every pull request.
+
+### Changing the protocol
+
+The WebSocket messages are a contract with [spicetify-websocket](https://github.com/tobfd/spicetify-websocket) and the Home Assistant integration. When you add, change or remove a request, event or field:
+
+1. Update [`PROTOCOL.md`](PROTOCOL.md) and [`protocol/messages.schema.json`](protocol/messages.schema.json) in the same pull request.
+2. Increase `PROTOCOL_VERSION` in `spicetify-connect-api.js` only for changes that receivers have to know about (removed or renamed fields, changed meaning). Additions do not need a new version.
+3. The end-to-end tests in spicetify-websocket run the real extension against the real server and validate all messages against this schema.
 
 > **Note:** The Spicetify Marketplace installs the extension straight from the default branch. Every merge to `master` reaches users without a separate release step, so test changes locally first.
 

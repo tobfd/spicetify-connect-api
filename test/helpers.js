@@ -7,7 +7,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
+const Ajv2020 = require("ajv/dist/2020");
+
 const EXTENSION = path.join(__dirname, "..", "spicetify-connect-api.js");
+const SCHEMA = path.join(__dirname, "..", "protocol", "messages.schema.json");
+
+// Every message the extension sends is checked against the protocol schema.
+const validateMessage = new Ajv2020({ allErrors: true, strict: false })
+    .compile(JSON.parse(fs.readFileSync(SCHEMA, "utf8")));
+const schemaErrors = [];
 
 class FakeWebSocket {
     static CONNECTING = 0;
@@ -24,7 +32,11 @@ class FakeWebSocket {
     }
 
     send(data) {
-        this.sent.push(JSON.parse(data));
+        const message = JSON.parse(data);
+        if (!validateMessage(message)) {
+            schemaErrors.push({ message, errors: validateMessage.errors });
+        }
+        this.sent.push(message);
     }
 
     close() {
@@ -74,6 +86,7 @@ function findAll(node, predicate, found = []) {
 
 function loadExtension({ playerData = null, settings = {} } = {}) {
     FakeWebSocket.instances = [];
+    schemaErrors.length = 0;
     const calls = [];
     const notifications = [];
     const listeners = {};
@@ -172,6 +185,7 @@ function loadExtension({ playerData = null, settings = {} } = {}) {
     return {
         calls,
         notifications,
+        schemaErrors,
         listeners,
         storage,
         player,

@@ -1,5 +1,5 @@
 /**
- * spicetify-connect-api (v0.3.2)
+ * spicetify-connect-api (v0.4.0)
  * Bridge between Spotify Desktop Client (Spicetify) and a WebSocket server (e.g. Python / Home Assistant).
  *
  * Installation:
@@ -16,7 +16,10 @@
     // 1. CONFIGURATION & LOCAL STORAGE
     // -------------------------------------------------------------------------
 
-    const APP_VERSION = "0.3.2";
+    const APP_VERSION = "0.4.0";
+    // Version of the WebSocket message format (see PROTOCOL.md). Increase it
+    // only for changes that receivers have to know about.
+    const PROTOCOL_VERSION = 1;
 
     const STORAGE_KEYS = {
         SERVER_URL: "spicetify-connect-api:server_url",
@@ -194,7 +197,11 @@
         }
     }
 
-    function sendResponse(requestId, success, payload = {}, error = null, includeToken = true) {
+    function sendError(requestId, code, message, includeToken = true) {
+        sendResponse(requestId, false, {}, message, includeToken, code);
+    }
+
+    function sendResponse(requestId, success, payload = {}, error = null, includeToken = true, code = null) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             try {
                 const config = getConfig();
@@ -208,6 +215,7 @@
                     response.token = config.API_KEY;
                 }
                 if (error) response.error = error;
+                if (code) response.code = code;
                 socket.send(JSON.stringify(response));
             } catch (err) {
                 console.warn("[Spicetify-WS] Error sending response:", err);
@@ -257,7 +265,10 @@
                     Spicetify.showNotification("Connect API: Server connected!");
                     notifyOnNextConnect = false;
                 }
-                sendStateEvent("InitialState");
+                sendStateEvent("InitialState", {
+                    protocolVersion: PROTOCOL_VERSION,
+                    extensionVersion: APP_VERSION
+                });
             };
 
             socket.onmessage = (event) => {
@@ -386,7 +397,7 @@
         if (currentConfig.API_KEY && token !== currentConfig.API_KEY) {
             console.warn("[Spicetify-WS] Unauthorized request attempt for '%s'. Token mismatch.", requestName);
             // Never send our own key to a server that does not know it.
-            sendResponse(requestId, false, {}, "Unauthorized: Invalid or missing API key.", false);
+            sendError(requestId, "unauthorized", "Unauthorized: Invalid or missing API key.", false);
             return;
         }
 
@@ -432,7 +443,7 @@
                         Spicetify.Player.setVolume(level);
                         sendResponse(requestId, true, { level });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'level' must be between 0.0 and 1.0.");
+                        sendError(requestId, "invalid_params", "Parameter 'level' must be between 0.0 and 1.0.");
                     }
                     break;
                 }
@@ -441,7 +452,7 @@
                         Spicetify.Player.setRepeat(payload.mode);
                         sendResponse(requestId, true, { mode: payload.mode });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'mode' must be 0, 1, or 2.");
+                        sendError(requestId, "invalid_params", "Parameter 'mode' must be 0, 1, or 2.");
                     }
                     break;
                 case "SetShuffle":
@@ -449,7 +460,7 @@
                         Spicetify.Player.setShuffle(payload.state);
                         sendResponse(requestId, true, { state: payload.state });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'state' must be a boolean.");
+                        sendError(requestId, "invalid_params", "Parameter 'state' must be a boolean.");
                     }
                     break;
                 case "SetMute":
@@ -457,7 +468,7 @@
                         setMuted(payload.state);
                         sendResponse(requestId, true, { isMuted: payload.state });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'state' must be a boolean.");
+                        sendError(requestId, "invalid_params", "Parameter 'state' must be a boolean.");
                     }
                     break;
                 case "SetHeart":
@@ -466,10 +477,10 @@
                             Spicetify.Player.setHeart(payload.status);
                             sendResponse(requestId, true, { isHearted: payload.status });
                         } else {
-                            sendResponse(requestId, false, {}, "Spicetify Heart API is not available.");
+                            sendError(requestId, "unavailable", "Spicetify Heart API is not available.");
                         }
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'status' must be a boolean.");
+                        sendError(requestId, "invalid_params", "Parameter 'status' must be a boolean.");
                     }
                     break;
                 case "ToggleHeart": {
@@ -478,7 +489,7 @@
                         Spicetify.Player.setHeart(newHeartState);
                         sendResponse(requestId, true, { isHearted: newHeartState });
                     } else {
-                        sendResponse(requestId, false, {}, "Spicetify Heart API is not available.");
+                        sendError(requestId, "unavailable", "Spicetify Heart API is not available.");
                     }
                     break;
                 }
@@ -489,7 +500,7 @@
                         await Spicetify.Player.playUri(formattedUri);
                         sendResponse(requestId, true, { uri: formattedUri });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'uri' or 'url' is missing/invalid.");
+                        sendError(requestId, "invalid_params", "Parameter 'uri' or 'url' is missing/invalid.");
                     }
                     break;
                 }
@@ -500,7 +511,7 @@
                         await seekTo(targetMs);
                         sendResponse(requestId, true, { position: targetMs });
                     } else {
-                        sendResponse(requestId, false, {}, "Parameter 'position' must be a non-negative number (ms).");
+                        sendError(requestId, "invalid_params", "Parameter 'position' must be a non-negative number (ms).");
                     }
                     break;
                 }
@@ -520,16 +531,16 @@
                     if (typeof Spicetify.Player.getHeart === "function") {
                         sendResponse(requestId, true, { isHearted: Spicetify.Player.getHeart() });
                     } else {
-                        sendResponse(requestId, false, { isHearted: false }, "Spicetify Heart API is not available.");
+                        sendError(requestId, "unavailable", "Spicetify Heart API is not available.");
                     }
                     break;
                 default:
-                    sendResponse(requestId, false, {}, `Unknown command '${requestName}'`);
+                    sendError(requestId, "unknown_request", `Unknown command '${requestName}'`);
                     break;
             }
         } catch (err) {
             console.warn("[Spicetify-WS] Error executing '%s':", requestName, err);
-            sendResponse(requestId, false, {}, (err && err.message) || "Internal error");
+            sendError(requestId, "command_failed", (err && err.message) || "Internal error");
         }
     }
 
@@ -569,8 +580,8 @@
         }
     }
 
-    function sendStateEvent(eventName) {
-        sendEvent(eventName, getFullPlayerState());
+    function sendStateEvent(eventName, extra = {}) {
+        sendEvent(eventName, { ...getFullPlayerState(), ...extra });
         syncPolledBaselines();
     }
 

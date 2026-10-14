@@ -83,91 +83,14 @@ It handles the WebSocket server setup, SSL/WSS contexts, API Key verification, e
 
 ---
 
-## 📡 WebSocket API Specification
+## 📡 WebSocket Protocol
 
-By default, the extension connects to `ws://127.0.0.1:9090`.
-
-### Incoming Requests (Server -> Spotify Client)
-
-Send JSON messages in the following structure (include `"token"` if API Key is set in settings):
+The extension connects as a WebSocket client (default `ws://127.0.0.1:9090`). The server sends JSON requests such as
 
 ```json
-{
-  "requestName": "SetVolume",
-  "requestId": "unique-id-123",
-  "token": "your-optional-api-key",
-  "payload": {
-    "level": 0.8
-  }
-}
+{ "requestName": "SetVolume", "requestId": "unique-id-123", "token": "your-optional-api-key", "payload": { "level": 0.8 } }
 ```
 
-#### Available Commands
+and the extension answers with a `Response` (including a machine-readable error `code` on failure) and pushes events with the complete player state.
 
-| Request Name                      | Payload Parameters                    | Description                                                                                                          |
-|:----------------------------------|:--------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
-| `Ping`                            | *None*                                | Responds with `{ "message": "Pong", "timestamp": ... }`.                                                             |
-| `Play`                            | *None*                                | Resumes playback.                                                                                                    |
-| `Pause`                           | *None*                                | Pauses playback.                                                                                                     |
-| `TogglePlay`                      | *None*                                | Toggles play/pause state.                                                                                            |
-| `NextSong`                        | *None*                                | Skips to the next track.                                                                                             |
-| `PreviousSong` / `Back`           | *None*                                | Standard Spotify back action (resets to 00:00 if playing > 2s).                                                      |
-| `ForcePreviousSong` / `ForceBack` | *None*                                | Forces skip to the actual previous track regardless of elapsed time.                                                 |
-| `SetVolume`                       | `level` (float `0.0` - `1.0`)         | Sets the volume level.                                                                                               |
-| `SetRepeat`                       | `mode` (`0`: Off, `1`: All, `2`: One) | Sets repeat mode.                                                                                                    |
-| `SetShuffle`                      | `state` (boolean)                     | Enables/disables shuffle.                                                                                            |
-| `SetMute`                         | `state` (boolean)                     | Mutes (volume 0) or unmutes (restores the previous volume).                                                          |
-| `SetHeart`                        | `status` (boolean)                    | Likes (`true`) or unlikes (`false`) the current track.                                                               |
-| `ToggleHeart`                     | *None*                                | Toggles the like/heart status of the current track.                                                                  |
-| `PlayUri`                         | `uri` or `url` (string)               | Plays an item via URI (`spotify:track:...`) or web URL (`https://open.spotify.com/track/...`). Fails if Spotify rejects it. |
-| `Seek`                            | `position` (number in ms, `>= 0`)     | Seeks to a specific track position in milliseconds.                                                                  |
-| `GetPlayerState`                  | *None*                                | Returns full player state snapshot (with patched live `position_as_of_timestamp`, `volume`, `isMuted`, `isHearted`). |
-| `GetCurrentTrack`                 | *None*                                | Returns active track object.                                                                                         |
-| `GetVolume`                       | *None*                                | Returns current volume level.                                                                                        |
-| `GetPlayPause`                    | *None*                                | Returns current play/pause status.                                                                                   |
-| `GetHeart`                        | *None*                                | Returns current track like/heart status (`{ isHearted: boolean }`).                                                  |
-
----
-
-### Outbound Event / Response Format (Spotify Client -> Server)
-
-#### Event Push Notification
-All player events (except `Ping`) emit the **complete player state** in their payload.
-
-Emitted event types include: `InitialState`, `SongChanged`, `PlayPauseChanged`, `VolumeChanged`, `RepeatChanged`, `ShuffleChanged`, `SeekChanged`, `HeartChanged`, `BufferingChanged`, `Ping`.
-
-```json
-{
-  "eventName": "SongChanged",
-  "token": "your-optional-api-key",
-  "payload": {
-    "playerData": {
-      "item": { ... },
-      "position_as_of_timestamp": 45120,
-      "volume": 0.8,
-      "is_muted": false,
-      "is_hearted": true,
-      "timestamp": 1772636000000
-    },
-    "isPlaying": true,
-    "volume": 0.8,
-    "isMuted": false,
-    "isHearted": true,
-    "shuffle": false,
-    "repeat": 0,
-    "progress": 45120
-  }
-}
-```
-
-#### Command Response
-
-```json
-{
-  "eventName": "Response",
-  "requestId": "unique-id-123",
-  "token": "your-optional-api-key",
-  "success": true,
-  "payload": { ... }
-}
-```
+The full specification (all requests, events, error codes, the state payload and versioning rules) is in **[PROTOCOL.md](PROTOCOL.md)**, with a machine-readable JSON Schema in [`protocol/messages.schema.json`](protocol/messages.schema.json). Current protocol version: **1**.

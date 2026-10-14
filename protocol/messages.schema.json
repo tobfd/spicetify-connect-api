@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tobfd/spicetify-connect-api/blob/master/protocol/messages.schema.json",
+  "title": "spicetify-connect-api WebSocket messages",
+  "description": "Protocol version 1. Every WebSocket text frame is one JSON object: a request (server to extension), an event or a response (extension to server). See PROTOCOL.md.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/event" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "token": {
+      "description": "The shared API key. Required when an API key is configured.",
+      "type": "string"
+    },
+    "request": {
+      "title": "Request (server to extension)",
+      "type": "object",
+      "required": ["requestName", "requestId"],
+      "properties": {
+        "requestName": {
+          "enum": [
+            "Ping", "Play", "Pause", "TogglePlay", "NextSong", "PreviousSong", "Back",
+            "ForcePreviousSong", "ForceBack", "SetVolume", "SetRepeat", "SetShuffle", "SetMute",
+            "SetHeart", "ToggleHeart", "PlayUri", "Seek", "GetPlayerState", "GetCurrentTrack",
+            "GetVolume", "GetPlayPause", "GetHeart"
+          ]
+        },
+        "requestId": { "type": "string", "minLength": 1 },
+        "token": { "$ref": "#/$defs/token" },
+        "payload": { "type": "object" }
+      },
+      "not": { "anyOf": [{ "required": ["eventName"] }] },
+      "allOf": [
+        {
+          "if": { "properties": { "requestName": { "const": "SetVolume" } } },
+          "then": {
+            "required": ["payload"],
+            "properties": { "payload": { "required": ["level"], "properties": { "level": { "type": "number", "minimum": 0, "maximum": 1 } } } }
+          }
+        },
+        {
+          "if": { "properties": { "requestName": { "const": "SetRepeat" } } },
+          "then": {
+            "required": ["payload"],
+            "properties": { "payload": { "required": ["mode"], "properties": { "mode": { "$ref": "#/$defs/repeatMode" } } } }
+          }
+        },
+        {
+          "if": { "properties": { "requestName": { "enum": ["SetShuffle", "SetMute"] } } },
+          "then": {
+            "required": ["payload"],
+            "properties": { "payload": { "required": ["state"], "properties": { "state": { "type": "boolean" } } } }
+          }
+        },
+        {
+          "if": { "properties": { "requestName": { "const": "SetHeart" } } },
+          "then": {
+            "required": ["payload"],
+            "properties": { "payload": { "required": ["status"], "properties": { "status": { "type": "boolean" } } } }
+          }
+        },
+        {
+          "if": { "properties": { "requestName": { "const": "PlayUri" } } },
+          "then": {
+            "required": ["payload"],
+            "properties": {
+              "payload": {
+                "anyOf": [{ "required": ["uri"] }, { "required": ["url"] }],
+                "properties": { "uri": { "type": "string" }, "url": { "type": "string" } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "requestName": { "const": "Seek" } } },
+          "then": {
+            "required": ["payload"],
+            "properties": { "payload": { "required": ["position"], "properties": { "position": { "type": "number", "minimum": 0 } } } }
+          }
+        }
+      ]
+    },
+    "event": {
+      "title": "Event (extension to server)",
+      "type": "object",
+      "required": ["eventName", "payload"],
+      "properties": {
+        "eventName": {
+          "enum": [
+            "InitialState", "SongChanged", "PlayPauseChanged", "VolumeChanged", "RepeatChanged",
+            "ShuffleChanged", "SeekChanged", "HeartChanged", "BufferingChanged", "Ping"
+          ]
+        },
+        "token": { "$ref": "#/$defs/token" },
+        "payload": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "eventName": { "const": "Ping" } } },
+          "then": {
+            "properties": {
+              "payload": {
+                "type": "object",
+                "required": ["timestamp"],
+                "properties": { "timestamp": { "type": "number" } }
+              }
+            }
+          },
+          "else": { "properties": { "payload": { "$ref": "#/$defs/statePayload" } } }
+        },
+        {
+          "if": { "properties": { "eventName": { "const": "InitialState" } } },
+          "then": {
+            "properties": {
+              "payload": {
+                "required": ["protocolVersion", "extensionVersion"],
+                "properties": {
+                  "protocolVersion": { "type": "integer", "minimum": 1 },
+                  "extensionVersion": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "response": {
+      "title": "Response (extension to server)",
+      "type": "object",
+      "required": ["eventName", "requestId", "success", "payload"],
+      "properties": {
+        "eventName": { "const": "Response" },
+        "requestId": { "type": ["string", "null"] },
+        "success": { "type": "boolean" },
+        "payload": { "type": "object" },
+        "error": { "type": "string" },
+        "code": { "$ref": "#/$defs/errorCode" },
+        "token": { "$ref": "#/$defs/token" }
+      },
+      "if": { "properties": { "success": { "const": false } } },
+      "then": { "required": ["error", "code"] }
+    },
+    "errorCode": {
+      "description": "Machine-readable reason for a failed request.",
+      "enum": ["unauthorized", "invalid_params", "unknown_request", "unavailable", "command_failed"]
+    },
+    "repeatMode": {
+      "description": "0 = off, 1 = repeat context (all), 2 = repeat track (one).",
+      "enum": [0, 1, 2]
+    },
+    "statePayload": {
+      "title": "Full player state, sent with every event except Ping and returned by GetPlayerState",
+      "type": "object",
+      "required": ["playerData", "isPlaying", "volume", "isMuted", "isHearted", "shuffle", "repeat", "progress"],
+      "properties": {
+        "playerData": {
+          "description": "Spicetify.Player.data with a live position. null while nothing is loaded.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/playerData" }]
+        },
+        "isPlaying": { "type": "boolean" },
+        "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "isMuted": { "type": "boolean" },
+        "isHearted": { "type": "boolean" },
+        "shuffle": { "type": "boolean" },
+        "repeat": { "$ref": "#/$defs/repeatMode" },
+        "progress": { "description": "Position in milliseconds.", "type": "number", "minimum": 0 },
+        "protocolVersion": { "type": "integer", "minimum": 1 },
+        "extensionVersion": { "type": "string" }
+      }
+    },
+    "playerData": {
+      "description": "Spotify's own player state. Only the fields listed here are relied upon; other fields may change with Spotify updates.",
+      "type": "object",
+      "required": ["positionAsOfTimestamp", "timestamp"],
+      "properties": {
+        "item": { "type": ["object", "null"] },
+        "context": { "type": ["object", "null"] },
+        "nextItems": { "type": "array", "maxItems": 5 },
+        "previousItems": { "type": "array", "maxItems": 5 },
+        "positionAsOfTimestamp": { "description": "Live position in milliseconds.", "type": "number", "minimum": 0 },
+        "timestamp": { "description": "Unix time in milliseconds when the snapshot was taken.", "type": "number" },
+        "duration": { "type": "number" },
+        "isPaused": { "type": "boolean" },
+        "isBuffering": { "type": "boolean" },
+        "shuffle": { "type": "boolean" },
+        "repeat": { "$ref": "#/$defs/repeatMode" },
+        "hasContext": { "type": "boolean" },
+        "restrictions": { "type": "object" }
+      }
+    }
+  }
+}
